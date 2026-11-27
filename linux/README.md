@@ -18,6 +18,14 @@ Double-click the AppImage to open the GUI, or run it with arguments for CLI use:
 ./BlizzGet-Linux-x86_64.AppImage --gui
 ```
 
+The Version dropdown loads all historical versions indexed by BlizzTrack for the
+selected game and region. The list is cached locally and can be refreshed with
+the Refresh versions button. Custom allows manual build/CDN hashes.
+
+Download connection limits are configurable in the GUI. The defaults are 48
+global connections and 12 per host. Higher values can improve throughput on
+some CDNs but may also increase retries or throttling.
+
 Example: download the official Diablo III 2.7.4.84161 client:
 
 ```bash
@@ -53,3 +61,12 @@ The output is written to `dist/BlizzGet-Linux-x86_64.AppImage`.
 
 Cascette is dual-licensed under MIT or Apache-2.0. Its license texts are
 included inside the AppImage and downloaded by the build script.
+
+## Windows
+
+Tagged releases also build `BlizzGet-Windows.exe` on GitHub Actions using
+PyInstaller. The executable bundles Python, Tkinter, Cascette, and all
+dependencies. Double-click it to open the same GUI, or pass CLI arguments.
+
+The `release.yml` workflow builds both the Linux AppImage and Windows exe and
+attaches them to the release tag.

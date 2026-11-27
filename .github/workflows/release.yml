@@ -1,0 +1,90 @@
+name: Build release artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and publish
+        required: true
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CASCETTE_COMMIT: dc0dfb89b146d80b363741de25c2be340c2da8fd
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfuse2 file xvfb
+      - name: Build AppImage
+        run: ./linux/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BlizzGet-Linux-x86_64.AppImage
+          path: dist/BlizzGet-Linux-x86_64.AppImage
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare Cascette source
+        shell: pwsh
+        run: |
+          git clone https://github.com/wowemulation-dev/cascette-py.git cascette-py
+          git -C cascette-py checkout $env:CASCETTE_COMMIT
+          git -C cascette-py apply ../cascette-d3.patch
+      - name: Install Python build dependencies
+        run: python -m pip install --upgrade pip && python -m pip install ./cascette-py pyinstaller
+      - name: Build Windows executable
+        run: >-
+          pyinstaller --noconfirm --clean --onefile --windowed
+          --name BlizzGet-Windows
+          --icon linux/blizzget.ico
+          --add-data "linux/blizzget.png;."
+          --paths cascette-py
+          --collect-all cascette_tools
+          linux/blizzget_gui.py
+      - name: Smoke-test Windows GUI
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath dist/BlizzGet-Windows.exe -PassThru
+          Start-Sleep -Seconds 30
+          if ($process.HasExited) { throw "BlizzGet Windows exited during GUI smoke test" }
+          Stop-Process -Id $process.Id -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BlizzGet-Windows-x86_64.exe
+          path: dist/BlizzGet-Windows.exe
+          if-no-files-found: error
+
+  release:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/BlizzGet-Linux-x86_64.AppImage dist/BlizzGet-Windows.exe --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/BlizzGet-Linux-x86_64.AppImage dist/BlizzGet-Windows.exe --generate-notes
+          fi

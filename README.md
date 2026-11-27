@@ -19,4 +19,5 @@ Using this is not recommended for playable versions, as it is probably slower th
 
 The `linux-appimage` branch adds a native x86_64 Linux CLI/AppImage build. It
 uses the Cascette NGDP/CASC installer because upstream BlizzGet is a Win32 GUI
-application. See [linux/README.md](linux/README.md) for build and usage instructions.
+application. Tagged releases also build a Windows `.exe`. See
+[linux/README.md](linux/README.md) for build and usage instructions.
