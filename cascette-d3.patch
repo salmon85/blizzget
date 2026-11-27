@@ -1,5 +1,5 @@
 diff --git a/cascette_tools/commands/install.py b/cascette_tools/commands/install.py
-index 9433ee1..b7dc1b0 100644
+index 9433ee1..dd70157 100644
 --- a/cascette_tools/commands/install.py
 +++ b/cascette_tools/commands/install.py
 @@ -15,6 +15,8 @@ Archive-groups are generated LOCALLY by Battle.net client.
@@ -148,7 +148,20 @@ index 9433ee1..b7dc1b0 100644
  
              # Create build info with selected configuration
              build_info = create_build_info(
-@@ -3210,12 +3239,16 @@ def update(
+@@ -2894,7 +2923,11 @@ def install_to_casc(
+             console.print(
+                 f"\n[cyan]Step 7:[/cyan] Installing {len(pending_entries)} files to local CASC..."
+             )
+-            console.print("  Concurrent connections: 12 global, 3 per host")
++            console.print(
++                "  Concurrent connections: "
++                f"{os.getenv('CASCETTE_MAX_CONCURRENCY', '12')} global, "
++                f"{os.getenv('CASCETTE_MAX_PER_HOST', '3')} per host"
++            )
+ 
+             installed, failed, integrity_errors, total_bytes = asyncio.run(
+                 _download_casc_files(
+@@ -3210,12 +3243,16 @@ def update(
                  for field_name, (old_val, new_val) in config_diff.items():
                      diff_table.add_row(
                          field_name,
@@ -171,7 +184,7 @@ index 9433ee1..b7dc1b0 100644
                      )
                  console.print(diff_table)
              else:
-@@ -3717,7 +3750,7 @@ async def _download_containerless_files(
+@@ -3717,7 +3754,7 @@ async def _download_containerless_files(
      failed = 0
      total_bytes = 0
  
