@@ -1,0 +1,355 @@
+diff --git a/cascette_tools/commands/install.py b/cascette_tools/commands/install.py
+index 9433ee1..b7dc1b0 100644
+--- a/cascette_tools/commands/install.py
++++ b/cascette_tools/commands/install.py
+@@ -15,6 +15,8 @@ Archive-groups are generated LOCALLY by Battle.net client.
+ from __future__ import annotations
+ 
+ import asyncio
++import os
++import re
+ from collections import defaultdict
+ from pathlib import Path
+ from typing import Any, cast
+@@ -384,9 +386,11 @@ def resolve_manifests(
+         )
+         table.add_row(
+             "Encoding Size",
+-            f"{encoding_info.size:,}"
+-            if encoding_info and encoding_info.size
+-            else "N/A",
++            (
++                f"{encoding_info.size:,}"
++                if encoding_info and encoding_info.size
++                else "N/A"
++            ),
+         )
+         table.add_row(
+             "Install Content Key", install_info.content_key if install_info else "N/A"
+@@ -401,9 +405,11 @@ def resolve_manifests(
+         )
+         table.add_row(
+             "Download Size",
+-            f"{download_info.size:,}"
+-            if download_info and download_info.size
+-            else "N/A",
++            (
++                f"{download_info.size:,}"
++                if download_info and download_info.size
++                else "N/A"
++            ),
+         )
+         console.print(table)
+ 
+@@ -524,9 +530,9 @@ def resolve_manifests(
+                 download_manifest = download_parser.parse(download_data)
+ 
+                 # Calculate priority distribution
+-                priority_buckets: dict[
+-                    int, tuple[int, int]
+-                ] = {}  # priority -> (count, total_size)
++                priority_buckets: dict[int, tuple[int, int]] = (
++                    {}
++                )  # priority -> (count, total_size)
+                 for entry in download_manifest.entries:
+                     if entry.priority not in priority_buckets:
+                         priority_buckets[entry.priority] = (0, 0)
+@@ -1068,6 +1074,21 @@ def extract_priority_files(
+         raise click.ClickException(f"Extraction failed: {e}") from e
+ 
+ 
++def extract_version_from_build_name(build_name: str) -> str:
++    """Extract a dotted client version from WoW or Diablo III build names."""
++    wow_match = re.search(r"(\d+)patch([\d.]+)", build_name)
++    if wow_match:
++        build_id, version = wow_match.groups()
++        return f"{version}.{build_id}"
++
++    d3_match = re.search(r"^(\d+)_[^_]+_(\d+)_(\d+)_(\d+)", build_name)
++    if d3_match:
++        build_id, major, minor, patch = d3_match.groups()
++        return f"{major}.{minor}.{patch}.{build_id}"
++
++    return ""
++
++
+ def filter_entries_by_tags(
+     entries: list[DownloadEntry],
+     tags: list[DownloadTag],
+@@ -1304,7 +1325,7 @@ async def _download_casc_files(
+         integrity_errors = 0
+         total_bytes = 0
+ 
+-        queue = DownloadQueue(max_concurrency=12, max_per_host=3, max_retries=3)
++        queue = _download_queue_from_env()
+ 
+         entry_priority: dict[str, int] = {
+             e.ekey.hex(): e.priority for e in pending_entries
+@@ -1339,9 +1360,9 @@ async def _download_casc_files(
+                 return DownloadResult(
+                     ekey=ek,
+                     data=data,
+-                    error=None
+-                    if data is not None
+-                    else "Not found in archives or loose",
++                    error=(
++                        None if data is not None else "Not found in archives or loose"
++                    ),
+                     source=source,
+                 )
+ 
+@@ -1856,9 +1877,9 @@ async def _fetch_root_content(
+     # Fetch missing files by full ekey: resolve each 9-byte prefix to the
+     # full 16-byte key via the CDN index (matches on the full key), then
+     # range-fetch from the archive with a loose fallback.
+-    from cascette_tools.core.download_queue import DownloadQueue, DownloadResult
++    from cascette_tools.core.download_queue import DownloadResult
+ 
+-    queue = DownloadQueue(max_concurrency=12, max_per_host=3, max_retries=3)
++    queue = _download_queue_from_env()
+     for prefix in missing_prefixes:
+         prefix_bytes = bytes.fromhex(prefix)
+ 
+@@ -2065,6 +2086,15 @@ async def _patch_casc_files(
+     return patched, failed, total_bytes
+ 
+ 
++def _download_queue_from_env() -> DownloadQueue:
++    """Create the download queue using optional concurrency overrides."""
++    return DownloadQueue(
++        max_concurrency=int(os.getenv("CASCETTE_MAX_CONCURRENCY", "12")),
++        max_per_host=int(os.getenv("CASCETTE_MAX_PER_HOST", "3")),
++        max_retries=3,
++    )
++
++
+ def _fmt_size(nbytes: int) -> str:
+     """Format byte count as human-readable string."""
+     if nbytes >= 1024**3:
+@@ -2414,14 +2444,13 @@ def install_to_casc(
+         if existing_info is None:
+             console.print("\n[cyan]Creating .build.info...[/cyan]")
+ 
+-            # Extract version from build name (e.g., "WOW-65300patch1.15.8" -> "1.15.8.65300")
+-            import re
+-
+-            if build_config.build_name:
+-                match = re.search(r"(\d+)patch([\d.]+)", build_config.build_name)
+-                if match:
+-                    build_id, version = match.groups()
+-                    version_str = f"{version}.{build_id}"
++            # Extract version from build name (e.g., WOW-65300patch1.15.8
++            # or 84161_Win32_2_7_4_RC).
++            version_str = (
++                extract_version_from_build_name(build_config.build_name)
++                if build_config.build_name
++                else ""
++            )
+ 
+             # Create build info with selected configuration
+             build_info = create_build_info(
+@@ -3210,12 +3239,16 @@ def update(
+                 for field_name, (old_val, new_val) in config_diff.items():
+                     diff_table.add_row(
+                         field_name,
+-                        (old_val or "")[:32] + "..."
+-                        if old_val and len(old_val) > 32
+-                        else old_val or "",
+-                        (new_val or "")[:32] + "..."
+-                        if new_val and len(new_val) > 32
+-                        else new_val or "",
++                        (
++                            (old_val or "")[:32] + "..."
++                            if old_val and len(old_val) > 32
++                            else old_val or ""
++                        ),
++                        (
++                            (new_val or "")[:32] + "..."
++                            if new_val and len(new_val) > 32
++                            else new_val or ""
++                        ),
+                     )
+                 console.print(diff_table)
+             else:
+@@ -3717,7 +3750,7 @@ async def _download_containerless_files(
+     failed = 0
+     total_bytes = 0
+ 
+-    queue = DownloadQueue(max_concurrency=12, max_per_host=3, max_retries=3)
++    queue = _download_queue_from_env()
+ 
+     for ekey, _ckey, _rel_path in entries:
+ 
+diff --git a/cascette_tools/core/types.py b/cascette_tools/core/types.py
+index 27b2c16..a69fcc7 100644
+--- a/cascette_tools/core/types.py
++++ b/cascette_tools/core/types.py
+@@ -32,6 +32,7 @@ class Product(StrEnum):
+     WOW_ANNIVERSARY = "wow_anniversary"
+     WOW_BETA = "wowt"
+     WOW_PTR = "wowxptr"
++    DIABLO_3 = "d3"
+     DIABLO_4 = "fenris"
+     OVERWATCH_2 = "pro"
+     HEARTHSTONE = "hsb"
+@@ -75,6 +76,7 @@ PRODUCT_FAMILY_MAP: dict[Product, ProductFamily] = {
+     Product.WOW_ANNIVERSARY: ProductFamily.WOW,
+     Product.WOW_BETA: ProductFamily.WOW,
+     Product.WOW_PTR: ProductFamily.WOW,
++    Product.DIABLO_3: ProductFamily.DIABLO,
+     Product.DIABLO_4: ProductFamily.DIABLO,
+     Product.DIABLO_2_RESURRECTED: ProductFamily.DIABLO,
+     Product.OVERWATCH_2: ProductFamily.OVERWATCH,
+diff --git a/cascette_tools/formats/build_info.py b/cascette_tools/formats/build_info.py
+index c0713f7..ebd161f 100644
+--- a/cascette_tools/formats/build_info.py
++++ b/cascette_tools/formats/build_info.py
+@@ -82,8 +82,10 @@ class LocalBuildInfo(BaseModel):
+     architecture: str | None = Field(
+         default=None, description="Target architecture (e.g., x86_64)"
+     )
+-    locale_configs: list[LocaleConfig] = Field(  # pyright: ignore[reportUnknownVariableType]
+-        default_factory=list, description="Installed locale configurations"
++    locale_configs: list[LocaleConfig] = (
++        Field(  # pyright: ignore[reportUnknownVariableType]
++            default_factory=list, description="Installed locale configurations"
++        )
+     )
+     region: str | None = Field(default=None, description="Target region (e.g., EU)")
+ 
+@@ -420,9 +422,13 @@ def create_build_info(
+     Returns:
+         Configured LocalBuildInfo
+     """
+-    tags_str = build_tags_string(
+-        platform, architecture, locale, region, has_speech, has_text
+-    )
++    if product == "d3":
++        # Diablo III's NGDP manifests only expose platform and locale tags.
++        tags_str = f"{platform} {locale}"
++    else:
++        tags_str = build_tags_string(
++            platform, architecture, locale, region, has_speech, has_text
++        )
+     cdn_hosts_str = " ".join(cdn_hosts)
+ 
+     # CDN Servers: full URLs per host, matching Agent.exe output shape.
+diff --git a/tests/test_commands/test_install_utils.py b/tests/test_commands/test_install_utils.py
+index c33a26b..5268a24 100644
+--- a/tests/test_commands/test_install_utils.py
++++ b/tests/test_commands/test_install_utils.py
+@@ -3,7 +3,9 @@
+ import pytest
+ 
+ from cascette_tools.commands.install import (
++    _download_queue_from_env,
+     _fmt_size,
++    extract_version_from_build_name,
+     filter_entries_by_tags,
+     get_product_enum,
+ )
+@@ -83,6 +85,7 @@ class TestGetProductEnum:
+             "wow_anniversary",
+             "wowt",
+             "wowxptr",
++            "d3",
+             "fenris",
+             "pro",
+             "hsb",
+@@ -101,6 +104,41 @@ class TestGetProductEnum:
+             assert result.value == product_code
+ 
+ 
++class TestDownloadQueueFromEnv:
++    """Tests for configurable downloader concurrency."""
++
++    def test_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
++        monkeypatch.delenv("CASCETTE_MAX_CONCURRENCY", raising=False)
++        monkeypatch.delenv("CASCETTE_MAX_PER_HOST", raising=False)
++
++        queue = _download_queue_from_env()
++
++        assert queue.max_concurrency == 12
++        assert queue.max_per_host == 3
++
++    def test_environment_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
++        monkeypatch.setenv("CASCETTE_MAX_CONCURRENCY", "48")
++        monkeypatch.setenv("CASCETTE_MAX_PER_HOST", "12")
++
++        queue = _download_queue_from_env()
++
++        assert queue.max_concurrency == 48
++        assert queue.max_per_host == 12
++
++
++class TestExtractVersionFromBuildName:
++    """Tests for extracting client versions from NGDP build names."""
++
++    def test_diablo_3_build_name(self) -> None:
++        assert extract_version_from_build_name("84161_Win32_2_7_4_RC") == "2.7.4.84161"
++
++    def test_wow_build_name(self) -> None:
++        assert extract_version_from_build_name("WOW-65300patch1.15.8") == "1.15.8.65300"
++
++    def test_unknown_build_name(self) -> None:
++        assert extract_version_from_build_name("custom-build") == ""
++
++
+ class TestFilterEntriesByTags:
+     """Tests for filter_entries_by_tags function."""
+ 
+diff --git a/tests/test_core/test_types.py b/tests/test_core/test_types.py
+index 1d75d3b..7edbfcf 100644
+--- a/tests/test_core/test_types.py
++++ b/tests/test_core/test_types.py
+@@ -10,7 +10,9 @@ from cascette_tools.core.types import (
+     EncryptionType,
+     FileDataId,
+     Product,
++    ProductFamily,
+     TACTKey,
++    get_product_family,
+ )
+ 
+ 
+@@ -44,6 +46,11 @@ class TestProduct:
+         assert Product.DIABLO_4 == "fenris"
+         assert Product.OVERWATCH_2 == "pro"
+ 
++    def test_diablo_3_product(self) -> None:
++        """Diablo III uses the d3 TACT product and Diablo CDN family."""
++        assert Product.DIABLO_3 == "d3"
++        assert get_product_family(Product.DIABLO_3) == ProductFamily.DIABLO
++
+ 
+ class TestBuildInfo:
+     """Tests for BuildInfo model."""
+diff --git a/tests/test_formats/test_build_info.py b/tests/test_formats/test_build_info.py
+index 53fdfb9..1a93ce6 100644
+--- a/tests/test_formats/test_build_info.py
++++ b/tests/test_formats/test_build_info.py
+@@ -323,6 +323,24 @@ class TestCreateBuildInfo:
+         assert info.locale_configs[0].has_speech is True
+         assert info.locale_configs[0].has_text is False
+ 
++    def test_create_diablo3_uses_platform_and_locale_tags(self) -> None:
++        """Diablo III manifests do not use WoW architecture/content tags."""
++        info = create_build_info(
++            branch="us",
++            build_config_hash="5194054cfa6480884c9a451b6f1107a3",
++            cdn_config_hash="6547fc64ca796c7c1b25864145814ace",
++            cdn_path="tpr/diablo3",
++            cdn_hosts=["level3.blizzard.com"],
++            version="2.7.4.84161",
++            product="d3",
++            platform="Windows",
++            architecture="x86_64",
++            locale="enUS",
++            region="us",
++        )
++
++        assert info.tags == "Windows enUS"
++
+     def test_cdn_hosts_joined_correctly(self):
+         """Test that CDN hosts are joined with spaces."""
+         info = create_build_info(

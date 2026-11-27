@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=BlizzGet Linux
+Comment=Download official Blizzard game files from the CDN
+Exec=blizzget
+Terminal=true
+Icon=blizzget
+Categories=Game;
+Keywords=Blizzard;Diablo;CDN;NGDP;CASC;

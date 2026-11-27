@@ -1,0 +1,25 @@
+name: Build Linux AppImage
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*-linux*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfuse2 file
+      - name: Build AppImage
+        run: ./linux/build-appimage.sh
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" dist/BlizzGet-Linux-x86_64.AppImage --clobber
