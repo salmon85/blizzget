@@ -1,6 +1,6 @@
 # blizzget
 
-[Download](https://github.com/d07RiV/blizzget/releases)
+[Download](https://github.com/salmon85/blizzget/releases)
 
 Blizzard CDN downloader. Capable of downloading upcoming versions of games. **They will most likely not be playable, but can be used for datamining and such** - if you're going to try to play the game, make sure you run it through battle.net app so it can fix the possible inconsistencies. Note that it always stores the CASC archive in the /Data folder, which is not correct for every game - you might want to rename the folder to what the actual game uses. Currently I only tested it for Diablo III.
 
@@ -15,9 +15,19 @@ Note that the program creates a cache in its local directory, which significantl
 
 Using this is not recommended for playable versions, as it is probably slower than the battle.net launcher (due to only using one download thread), and might not install everything correctly. It is also incapable of patching (aka upgrading a previous installation). You might be able to use it to pre-download an upcoming game and then use the battle.net launcher to 'fix' it (make sure to rename the Data folder to what is appropriate for the specific game, though.. in some cases it even has to be inside another folder, i.e. /data/casc for Overwatch).
 
-## Linux
+## Linux and Windows releases
 
-The `linux-appimage` branch adds a native x86_64 Linux CLI/AppImage build. It
-uses the Cascette NGDP/CASC installer because upstream BlizzGet is a Win32 GUI
-application. Tagged releases also build a Windows `.exe`. See
+This fork adds native Linux and Windows releases using the Cascette NGDP/CASC
+installer because upstream BlizzGet is a Win32 GUI application. Tagged releases
+build both a Linux AppImage and a Windows `.exe`. See
 [linux/README.md](linux/README.md) for build and usage instructions.
+
+<hr/>
+
+<b>Overwatch Beta</b>
+1. Download a pre built app from the releases tab, or compile with VS2022.
+2. Open the upstream BlizzGet app and select program code: `prob - Overwatch Beta` and your region.
+3. Select the available build ID; `build-branch` should look like `2_00_8_0`.
+4. Wait for the encoding table and download list.
+5. Select your language and destination folder, then click Start.
+6. Wait for the download to complete. Login still requires an account allowed to join the relevant service.

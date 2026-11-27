@@ -1,3 +1,7 @@
 dist/
 __pycache__/
 *.pyc
+
+vc13/Debug/
+vc13/.vs/
+vc13/Release/

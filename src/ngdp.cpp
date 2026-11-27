@@ -22,8 +22,10 @@ namespace NGDP {
     { "heroc", "Heroes of the Storm Tournament" },
     { "hsb", "Hearthstone" },
     { "hst", "Hearthstone Test (Partial)" },
+    { "osib", "Diablo II: Resurrected (Alpha)" },
     { "pro", "Overwatch Retail" },
     { "prot", "Overwatch Test" },
+    { "prob", "Overwatch Beta" },
     { "proc", "Overwatch Tournament" },
     { "prodev", "Overwatch Dev (Encrypted)" },
     { "s1", "StarCraft I" },
@@ -40,6 +42,10 @@ namespace NGDP {
     { "wow", "World of Warcraft Retail" },
     { "wowt", "World of Warcraft Test" },
     { "wow_beta", "World of Warcraft Beta" },
+    { "wow_classic", "World of Warcraft Classic" },
+    { "wow_classic_beta", "World of Warcraft Classic Beta" },
+    { "wowdemo", "World of Warcraft Demo" },
+    { "wowdev", "World of Warcraft Dev" },
   };
 
   NGDP::NGDP(std::string const& app)
