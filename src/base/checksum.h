@@ -31,3 +31,4 @@ public:
 
 uint64 jenkins(void const* buf, uint32 length);
 uint32 hashlittle(void const* buf, uint32 length, uint32 initval);
+void hashlittle2(void const* buf, uint32 length, uint32* primary, uint32* secondary);

@@ -6,13 +6,21 @@
 #include <cctype>
 #include <vector>
 #include <map>
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <vector>
 #define NOMINMAX
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include "string.h"
 
 class RefCounted {
-  uint32 ref_;
+  std::atomic<uint32> ref_;
 public:
   RefCounted() : ref_(1) {}
   virtual ~RefCounted() {}
@@ -55,24 +63,24 @@ template<> struct FlipTraits<1> {
 };
 
 template<> struct FlipTraits<2> {
-  typedef unsigned short T;
-  static T flip(T x) { return _byteswap_ushort(x); }
+  typedef std::uint16_t T;
+  static T flip(T x) { return __builtin_bswap16(x); }
 };
 
 template<> struct FlipTraits<4> {
-  typedef unsigned long T;
-  static T flip(T x) { return _byteswap_ulong(x); }
+  typedef std::uint32_t T;
+  static T flip(T x) { return __builtin_bswap32(x); }
 };
 
 template<> struct FlipTraits<8> {
-  typedef unsigned long long T;
-  static T flip(T x) { return _byteswap_uint64(x); }
+  typedef std::uint64_t T;
+  static T flip(T x) { return __builtin_bswap64(x); }
 };
 
 template<typename T>
 void flip(T& x) {
   typedef FlipTraits<sizeof(T)> Flip;
-  x = static_cast<T>(Flip::flip(static_cast<Flip::T>(x)));
+  x = static_cast<T>(Flip::flip(static_cast<typename Flip::T>(x)));
 }
 
 std::string formatSize(uint64 size);

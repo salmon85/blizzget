@@ -2,13 +2,13 @@
 #include "common.h"
 
 uint32 RefCounted::addref() {
-  return InterlockedIncrement(&ref_);
+  return ref_.fetch_add(1) + 1;
 }
 uint32 RefCounted::release() {
   if (!this) {
     return 0;
   }
-  uint32 result = InterlockedDecrement(&ref_);
+  uint32 result = ref_.fetch_sub(1) - 1;
   if (!result) {
     delete this;
   }
@@ -21,20 +21,7 @@ void _qmemset(uint32* mem, uint32 fill, uint32 count) {
   }
 }
 
-#include "zlib/zlib.h"
-#ifdef _WIN64
-  #ifdef _DEBUG
-    #pragma comment(lib, "zlib/zlib64d.lib")
-  #else
-    #pragma comment(lib, "zlib/zlib64r.lib")
-  #endif
-#else
-  #ifdef _DEBUG
-    #pragma comment(lib, "zlib/zlib32d.lib")
-  #else
-    #pragma comment(lib, "zlib/zlib32r.lib")
-  #endif
-#endif
+#include <zlib.h>
 
 uint32 gzdeflate(uint8 const* in, uint32 in_size, uint8* out, uint32* out_size) {
   z_stream z;

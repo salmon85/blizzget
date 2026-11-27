@@ -15,12 +15,12 @@ Note that the program creates a cache in its local directory, which significantl
 
 Using this is not recommended for playable versions, as it is probably slower than the battle.net launcher (due to only using one download thread), and might not install everything correctly. It is also incapable of patching (aka upgrading a previous installation). You might be able to use it to pre-download an upcoming game and then use the battle.net launcher to 'fix' it (make sure to rename the Data folder to what is appropriate for the specific game, though.. in some cases it even has to be inside another folder, i.e. /data/casc for Overwatch).
 
-## Linux and Windows releases
+## Linux release
 
-This fork adds native Linux and Windows releases using the Cascette NGDP/CASC
-installer because upstream BlizzGet is a Win32 GUI application. Tagged releases
-build both a Linux AppImage and a Windows `.exe`. See
-[linux/README.md](linux/README.md) for build and usage instructions.
+This fork adds a native Linux AppImage with a C++/GTK3 GUI and downloader.
+See [linux/README.md](linux/README.md) for build and usage instructions.
+The upstream Win32 source remains in `src/` and `vc13/`, but the packaged Linux
+release contains no Python or Tkinter wrapper.
 
 <hr/>
 

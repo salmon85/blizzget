@@ -1,4 +1,6 @@
 #include "checksum.h"
+#include <cstring>
+#include <cstdio>
 
 uint32 update_crc(uint32 crc, void const* vbuf, uint32 length) {
   static uint32 crc_table[256];
@@ -220,4 +222,52 @@ uint32 hashlittle(void const* buf, uint32 length, uint32 initval) {
   c ^= b; c -= rot(b, 24);
 
   return c;
+}
+
+void hashlittle2(void const* buffer, uint32 length, uint32* primary, uint32* secondary) {
+  uint32 a, b, c;
+  a = b = c = 0xDEADBEEF + length + *primary;
+  c += *secondary;
+
+  auto readLittle32 = [](uint8_t const* ptr) {
+    return uint32(ptr[0]) | (uint32(ptr[1]) << 8) |
+           (uint32(ptr[2]) << 16) | (uint32(ptr[3]) << 24);
+  };
+
+  uint8_t const* k = static_cast<uint8_t const*>(buffer);
+  while (length > 12) {
+    a += readLittle32(k);
+    b += readLittle32(k + 4);
+    c += readLittle32(k + 8);
+
+    a -= c; a ^= rot(c, 4); c += b;
+    b -= a; b ^= rot(a, 6); a += c;
+    c -= b; c ^= rot(b, 8); b += a;
+    a -= c; a ^= rot(c, 16); c += b;
+    b -= a; b ^= rot(a, 19); a += c;
+    c -= b; c ^= rot(b, 4); b += a;
+
+    length -= 12;
+    k += 12;
+  }
+
+  for (uint32 i = 0; i < length && i < 4; ++i) a += uint32(k[i]) << (i * 8);
+  for (uint32 i = 4; i < length && i < 8; ++i) b += uint32(k[i]) << ((i - 4) * 8);
+  for (uint32 i = 8; i < length && i < 12; ++i) c += uint32(k[i]) << ((i - 8) * 8);
+  if (length == 0) {
+    *primary = c;
+    *secondary = b;
+    return;
+  }
+
+  c ^= b; c -= rot(b, 14);
+  a ^= c; a -= rot(c, 11);
+  b ^= a; b -= rot(a, 25);
+  c ^= b; c -= rot(b, 16);
+  a ^= c; a -= rot(c, 4);
+  b ^= a; b -= rot(a, 14);
+  c ^= b; c -= rot(b, 24);
+
+  *primary = c;
+  *secondary = b;
 }

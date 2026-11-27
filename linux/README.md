@@ -1,48 +1,44 @@
 # BlizzGet Linux
 
-This branch adds a native Linux command-line build of the Blizzard CDN
-downloader functionality. Upstream BlizzGet 1.1 is a Win32 GUI application and
-has no Linux target, so the Linux build uses the MIT/Apache-2.0 Cascette
-NGDP/CASC installer with a small Diablo III compatibility patch.
+This branch replaces the Python wrapper with a native C++/GTK3 application.
+The downloader, NGDP/CASC parsing, CDN range requests, local storage writer,
+version-history client, and GUI are all C++.
 
 The AppImage downloads files from Blizzard's official CDN. It does not contain
 game assets and requires ownership of the game.
 
 ## Run
 
-Double-click the AppImage to open the GUI, or run it with arguments for CLI use:
+Double-click the AppImage, or run:
 
 ```bash
-./BlizzGet-Linux-x86_64.AppImage --help
-./BlizzGet-Linux-x86_64.AppImage version
-./BlizzGet-Linux-x86_64.AppImage --gui
+./BlizzGet-Linux-x86_64.AppImage
 ```
 
-The Version dropdown loads all historical versions indexed by BlizzTrack for the
+The Version dropdown loads historical versions indexed by BlizzTrack for the
 selected game and region. The list is cached locally and can be refreshed with
-the Refresh versions button. Custom allows manual build/CDN hashes.
+the Refresh button. Advanced exposes manual build/CDN hashes.
 
-Download connection limits are configurable in the GUI. The defaults are 48
-global connections and 12 per host. Higher values can improve throughput on
-some CDNs but may also increase retries or throttling.
+The dark/light button switches themes. Download connection limits and speed
+caps are configurable. The defaults are 48 global connections and 12 per host.
 
-Example: download the official Diablo III 2.7.4.84161 client:
-
-```bash
-./BlizzGet-Linux-x86_64.AppImage install install-product \
-  5194054cfa6480884c9a451b6f1107a3 \
-  6547fc64ca796c7c1b25864145814ace \
-  "$HOME/Games/Diablo III 2.7.4" \
-  --product d3 --region us --platform Windows --arch x86_64 \
-  --locale enUS --subfolder ''
-```
-
-The old build config is paired with the current CDN config, matching BlizzGet's
-behavior. The historical CDN config is no longer served.
+The Cache directory field controls both the CDN archive cache and cached
+version lists. It defaults to `~/.cache/cascette`. Enable Clear cache on close
+to remove BlizzGet's `cdn` and `versions` cache contents after the downloader
+has stopped. BlizzGet asks for confirmation and preserves unrelated files in
+the selected directory.
 
 ## Build locally
 
-Requirements: `git`, `curl`, `uv`, and an x86_64 Linux host.
+Requirements on Debian/Ubuntu:
+
+```bash
+sudo apt-get install -y build-essential cmake pkg-config \
+  libgtk-3-dev libjson-glib-dev libcurl4-openssl-dev liblz4-dev \
+  zlib1g-dev libfuse2 file xvfb
+```
+
+Build the AppImage:
 
 ```bash
 ./linux/build-appimage.sh
@@ -50,23 +46,25 @@ Requirements: `git`, `curl`, `uv`, and an x86_64 Linux host.
 
 The output is written to `dist/BlizzGet-Linux-x86_64.AppImage`.
 
+For a local native binary without packaging:
+
+```bash
+cmake -S native -B build-native -DCMAKE_BUILD_TYPE=Release
+cmake --build build-native
+./build-native/blizzget
+```
+
 ## Source layout
 
-- `cascette-d3.patch` adds Diablo III product support, correct `.build.info`
-  tags/version parsing, tests, and configurable download concurrency.
-- `linux/build-appimage.sh` pins Cascette commit
-  `dc0dfb89b146d80b363741de25c2be340c2da8fd`, applies the patch, installs a
-  portable Python runtime and dependencies, and builds the AppImage.
-- `linux/AppRun` launches the bundled CLI without a system Python installation.
+- `native/app.cpp` contains the GTK3 interface and asynchronous UI updates.
+- `native/downloader.cpp` contains BlizzTrack history, NGDP manifests, archive
+  range downloads, cache handling, and installation.
+- `src/ngdp.cpp` contains BLTE, encoding-table, and local CASC storage support.
+- `src/base/` contains the portable C++ file, HTTP, path, checksum, and string
+  layers ported from upstream BlizzGet.
+- `linux/build-appimage.sh` builds the C++ binary, bundles GTK and its native
+  libraries, and creates the AppImage.
+- `linux/AppRun` launches the bundled native binary with its private library,
+  schema, font, and pixbuf paths.
 
-Cascette is dual-licensed under MIT or Apache-2.0. Its license texts are
-included inside the AppImage and downloaded by the build script.
-
-## Windows
-
-Tagged releases also build `BlizzGet-Windows.exe` on GitHub Actions using
-PyInstaller. The executable bundles Python, Tkinter, Cascette, and all
-dependencies. Double-click it to open the same GUI, or pass CLI arguments.
-
-The `release.yml` workflow builds both the Linux AppImage and Windows exe and
-attaches them to the release tag.
+The native AppImage contains no Python runtime or Python GUI wrapper.

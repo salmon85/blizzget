@@ -1,91 +1,55 @@
 #include "path.h"
+#include "error.h"
+
+#include <filesystem>
+#include <vector>
+
+#ifdef _WIN32
 #include <windows.h>
+#endif
+
+namespace fs = std::filesystem;
 using namespace std;
 
-string path::name(string const& path) {
-  int pos = path.length();
-  while (pos > 0 && path[pos - 1] != '/' && path[pos - 1] != '\\') {
-    --pos;
-  }
-  return path.substr(pos);
-}
-string path::title(string const& path) {
-  int pos = path.length();
-  int dot = path.length();
-  while (pos > 0 && path[pos - 1] != '/' && path[pos - 1] != '\\') {
-    --pos;
-    if (path[pos] == '.' && dot == path.length()) {
-      dot = pos;
-    }
-  }
-  if (dot == pos) {
-    return path.substr(pos);
-  } else {
-    return path.substr(pos, dot - pos);
-  }
-}
-string path::path(string const& path) {
-  int pos = path.length();
-  while (pos > 0 && path[pos - 1] != '/' && path[pos - 1] != '\\') {
-    --pos;
-  }
-  return path.substr(0, pos ? pos - 1 : 0);
-}
-string path::ext(string const& path) {
-  int pos = path.length();
-  int dot = path.length();
-  while (pos > 0 && path[pos - 1] != '/' && path[pos - 1] != '\\') {
-    --pos;
-    if (path[pos] == '.' && dot == path.length()) {
-      dot = pos;
-    }
-  }
-  if (dot == pos) {
-    return "";
-  } else {
-    return path.substr(dot);
-  }
+string path::name(string const& value) {
+  return fs::path(value).filename().string();
 }
 
-void path::create(std::string const& path) {
-  std::string buf;
-  for (char chr : path) {
-    if (chr == '/' || chr == '\\') chr = sep;
-    buf.push_back(chr);
-    if (chr == sep) {
-      CreateDirectory(buf.c_str(), nullptr);
-    }
-  }
-  if (!buf.empty() && buf.back() != sep) {
-    CreateDirectory(buf.c_str(), nullptr);
-  }
+string path::title(string const& value) {
+  return fs::path(value).stem().string();
 }
 
-#include <windows.h>
+string path::path(string const& value) {
+  return fs::path(value).parent_path().string();
+}
+
+string path::ext(string const& value) {
+  return fs::path(value).extension().string();
+}
+
+void path::create(string const& value) {
+  if (value.empty()) return;
+  std::error_code ec;
+  fs::create_directories(value, ec);
+  if (ec) throw Exception("failed to create directory: ") << value;
+}
+
 std::string path::root() {
   static std::string root_;
   if (root_.empty()) {
-    char buffer[512];
-    GetModuleFileName(GetModuleHandle(NULL), buffer, sizeof buffer);
-    root_ = path(buffer);
+#ifdef _WIN32
+    vector<char> buffer(32768);
+    DWORD length = GetModuleFileNameA(nullptr, buffer.data(), buffer.size());
+    root_ = fs::path(string(buffer.data(), length)).parent_path().string();
+#else
+    root_ = fs::read_symlink("/proc/self/exe").parent_path().string();
+#endif
   }
   return root_;
-  //char buffer[512];
-  //GetCurrentDirectory(sizeof buffer, buffer);
-  //return buffer;
 }
 
-string operator / (string const& lhs, string const& rhs) {
-  if (lhs.empty() || rhs.empty()) return lhs + rhs;
-  bool left = (lhs.back() == '\\' || lhs.back() == '/');
-  bool right = (rhs.front() == '\\' || rhs.front() == '/');
-  if (left && right) {
-    string res = lhs;
-    res.pop_back();
-    return res + rhs;
-  } else if (!left && !right) {
-    return lhs + path::sep + rhs;
-  } else {
-    return lhs + rhs;
-  }
+string operator/(string const& lhs, string const& rhs) {
+  if (lhs.empty()) return rhs;
+  if (rhs.empty()) return lhs;
+  return (fs::path(lhs) / fs::path(rhs)).string();
 }

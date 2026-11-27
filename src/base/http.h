@@ -1,20 +1,24 @@
 #pragma once
 
-#include <windows.h>
-#include <winhttp.h>
-#include <memory>
+#include <functional>
+#include <map>
 #include <string>
+#include <vector>
 #include "file.h"
 
 class HttpRequest {
 public:
-  enum RequestType {GET, POST};
+  enum RequestType { GET, POST };
 
   HttpRequest(std::string const& url, RequestType type = GET);
 
   void addHeader(std::string const& name, std::string const& value);
   void addHeader(std::string const& header);
   void addData(std::string const& key, std::string const& value);
+  void setTimeout(long seconds) { timeout_ = seconds; }
+  void setProgressCallback(std::function<void(uint64, uint64)> callback) {
+    progress_ = std::move(callback);
+  }
 
   bool send();
   uint32 status();
@@ -24,15 +28,13 @@ public:
   static File get(std::string const& url);
 
 private:
-  struct SessionHolder {
-    HINTERNET session = nullptr;
-    HINTERNET connect = nullptr;
-    HINTERNET request = nullptr;
-    ~SessionHolder();
-  };
-  friend class HttpBuffer;
-  std::shared_ptr<SessionHolder> handles_;
+  std::string url_;
   RequestType type_;
-  std::wstring headers_;
+  std::vector<std::string> headers_;
   std::string post_;
+  long status_ = 0;
+  long timeout_ = 60;
+  std::map<std::string, std::string> responseHeaders_;
+  std::string body_;
+  std::function<void(uint64, uint64)> progress_;
 };

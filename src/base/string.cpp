@@ -3,12 +3,15 @@
 #include <stdarg.h>
 #include <clocale>
 #include <algorithm>
+#include <cstring>
 #include "types.h"
 #include "error.h"
 
 std::string strlower(std::string const& str) {
   std::string dest(str.size(), ' ');
-  std::transform(str.begin(), str.end(), dest.begin(), std::tolower);
+  std::transform(str.begin(), str.end(), dest.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
   return dest;
 }
 
@@ -78,10 +81,12 @@ std::string fmtstring(char const* fmt, ...) {
   return res;
 }
 std::string varfmtstring(char const* fmt, va_list list) {
-  uint32 len = _vscprintf(fmt, list);
-  std::string dst;
-  dst.resize(len + 1);
-  vsprintf(&dst[0], fmt, list);
+  va_list copy;
+  va_copy(copy, list);
+  int len = vsnprintf(nullptr, 0, fmt, copy);
+  va_end(copy);
+  std::string dst(static_cast<size_t>(len) + 1, '\0');
+  vsnprintf(&dst[0], dst.size(), fmt, list);
   dst.resize(len);
   return dst;
 }

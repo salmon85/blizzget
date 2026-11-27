@@ -1,7 +1,8 @@
 #pragma once
 #include "base/common.h"
-#include "base/json.h"
+#include "base/error.h"
 #include "base/file.h"
+#include <array>
 #include <unordered_map>
 
 namespace NGDP {
@@ -156,11 +157,13 @@ namespace NGDP {
     File& addFile(const Hash hash, File& file); // <- original (compressed) file
 
     void finish() {
-      writeIndex();
+      if (data_) data_.flush();
+      for (uint32 bucket = 0; bucket < IndexCount; ++bucket) writeIndex(bucket);
     }
 
   private:
     enum {
+      IndexCount = 16,
       MaxIndexEntries = (0x8E000 - 0x28) / 18,
       MaxDataSize = 0x40000000,
     };
@@ -171,12 +174,12 @@ namespace NGDP {
       uint16 index;
       uint32 offset;
     };
-    std::vector<IndexEntry> index_;
+    std::array<std::vector<IndexEntry>, IndexCount> indices_;
     File data_;
-    uint32 indexCount_;
+    std::array<uint32, IndexCount> indexVersions_{};
     uint32 dataCount_;
 
-    void writeIndex();
+    void writeIndex(uint32 bucket);
   };
 
 }

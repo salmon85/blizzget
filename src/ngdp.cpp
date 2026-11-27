@@ -3,10 +3,22 @@
 #include "base/path.h"
 #include "base/checksum.h"
 #include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <lz4.h>
 
 namespace NGDP {
 
   const std::string HOST = "http://us.patch.battle.net:1119";
+
+  static std::string cacheRoot() {
+    if (char const* value = std::getenv("BLIZZGET_CACHE_DIR")) return value;
+    if (char const* value = std::getenv("CASCETTE_CACHE_DIR")) return value;
+    if (char const* home = std::getenv("HOME")) {
+      return (std::filesystem::path(home) / ".cache" / "cascette").string();
+    }
+    return path::root() / "cache";
+  }
 
   const std::map<std::string, std::string> ProgramCodes = {
     { "agent", "Battle.net Agent" },
@@ -102,7 +114,7 @@ namespace NGDP {
   }
 
   File DecodeBLTE(File& blte, uint32 eusize) {
-    if (blte.read32(true) != 'BLTE') return File();
+    if (blte.read32(true) != 0x424C5445) return File();
     uint32 headerSize = blte.read32(true);
     if (headerSize) {
       std::vector<uint32> csize;
@@ -125,6 +137,16 @@ namespace NGDP {
           tmp.resize(csize[i] - 1);
           blte.read(&tmp[0], tmp.size());
           if (gzinflate(&tmp[0], tmp.size(), dst.reserve(usize[i]), &usize[i])) return File();
+        } else if (type == 'L') {
+          tmp.resize(csize[i] - 1);
+          blte.read(&tmp[0], tmp.size());
+          uint8* out = dst.reserve(usize[i]);
+          if (LZ4_decompress_safe(reinterpret_cast<char const*>(tmp.data()),
+                                  reinterpret_cast<char*>(out),
+                                  static_cast<int>(tmp.size()),
+                                  static_cast<int>(usize[i])) != static_cast<int>(usize[i])) {
+            return File();
+          }
         } else {
           // unsupported compression
           return File();
@@ -135,14 +157,25 @@ namespace NGDP {
     } else {
       uint64 offset = blte.tell();
       uint64 size = blte.size() - offset;
-      if (blte.read8() == 'N') {
-        return blte.subfile(offset, size);
+      uint8 type = blte.read8();
+      if (type == 'N') {
+        return blte.subfile(offset + 1, size - 1);
       } else if (eusize) {
-        blte.seek(offset, SEEK_SET);
-        std::vector<uint8> tmp(size);
-        blte.read(&tmp[0], size);
+        blte.seek(offset + 1, SEEK_SET);
+        std::vector<uint8> tmp(size - 1);
+        blte.read(&tmp[0], tmp.size());
         MemoryFile dst;
-        if (gzinflate(&tmp[0], size, dst.reserve(eusize), &eusize)) return File();
+        if (type == 'L') {
+          uint8* out = dst.reserve(eusize);
+          if (LZ4_decompress_safe(reinterpret_cast<char const*>(tmp.data()),
+                                  reinterpret_cast<char*>(out),
+                                  static_cast<int>(tmp.size()),
+                                  static_cast<int>(eusize)) != static_cast<int>(eusize)) {
+            return File();
+          }
+        } else if (gzinflate(&tmp[0], tmp.size(), dst.reserve(eusize), &eusize)) {
+          return File();
+        }
         dst.seek(0);
         return dst;
       } else {
@@ -197,7 +230,7 @@ namespace NGDP {
     flip(header.entriesA);
     flip(header.entriesB);
     flip(header.stringSize);
-    if (header.signature != 'EN' || header.sizeA != 16 || header.sizeB != 16) {
+    if (header.signature != 0x454E || header.sizeA != 16 || header.sizeB != 16) {
       throw Exception("invalid encoding file");
     }
 
@@ -322,18 +355,13 @@ namespace NGDP {
     path::create(root / "patch");
 
     std::vector<std::string> names;
-    WIN32_FIND_DATA fdata;
-    HANDLE hFind = FindFirstFile((root / "data" / "*").c_str(), &fdata);
-    if (hFind == INVALID_HANDLE_VALUE) return;
-    do {
-      if (!(fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-        names.push_back(fdata.cFileName);
-      }
-    } while (FindNextFile(hFind, &fdata));
-    FindClose(hFind);
+    std::error_code ec;
+    for (auto const& entry : std::filesystem::directory_iterator(root / "data", ec)) {
+      if (!entry.is_directory(ec)) names.push_back(entry.path().filename().string());
+    }
 
     for (std::string const& name : names) {
-      DeleteFile((root / "data" / name).c_str());
+      std::filesystem::remove(root / "data" / name, ec);
     }
   }
 
@@ -355,34 +383,37 @@ namespace NGDP {
 
   File& CascStorage::addCache(std::string const& name, File& file) {
     file.seek(0);
-    File(path::root() / "cache" / name, File::REWRITE).copy(file);
+    File(cacheRoot() / name, File::REWRITE).copy(file);
     file.seek(0);
     return file;
   }
   File CascStorage::addCache(std::string const& name) {
-    return File(path::root() / "cache" / name, File::MODIFY);
+    return File(cacheRoot() / name, File::MODIFY);
   }
   File CascStorage::getCache(std::string const& name) {
-    return File(path::root() / "cache" / name);
+    return File(cacheRoot() / name);
   }
 
   DataStorage::DataStorage(CascStorage& storage)
     : storage_(storage)
-    , indexCount_(0)
     , dataCount_(0)
   {
   }
 
   File& DataStorage::addFile(const Hash hash, File& file) {
     if (!file) return file;
-    if (index_.size() >= MaxIndexEntries) {
-      writeIndex();
+    uint8_t folded = 0;
+    for (int i = 0; i < 9; ++i) folded ^= hash[i];
+    uint32 bucket = ((folded >> 4) ^ folded) & 0x0F;
+    auto& index = indices_[bucket];
+    if (index.size() >= MaxIndexEntries) {
+      writeIndex(bucket);
     }
     if (!data_ || data_.size() + file.size() + 30 > MaxDataSize) {
       data_ = storage_.addData(fmtstring("data.%03u", dataCount_++));
     }
-    index_.emplace_back();
-    auto& entry = index_.back();
+    index.emplace_back();
+    auto& entry = index.back();
     memcpy(entry.hash, hash, sizeof(Hash));
     entry.index = dataCount_ - 1;
     entry.offset = data_.tell();
@@ -419,14 +450,17 @@ namespace NGDP {
   };
 #pragma pack(pop)
 
-  void DataStorage::writeIndex() {
-    if (index_.empty()) return;
+  void DataStorage::writeIndex(uint32 bucket) {
+    if (bucket >= IndexCount) return;
+    auto& index_ = indices_[bucket];
+    if (index_.empty() && indexVersions_[bucket] != 0) return;
 
     IndexHeader header;
-    header.keyIndex = indexCount_++;
-    header.maxOffset = _byteswap_uint64(MaxDataSize);
+    header.keyIndex = static_cast<uint8>(bucket);
+    header.maxOffset = __builtin_bswap64(MaxDataSize);
+    uint32 version = ++indexVersions_[bucket];
 
-    File index = storage_.addData(fmtstring("%02x%08x.idx", indexCount_ - 1, 1));
+    File index = storage_.addData(fmtstring("%02x%08x.idx", bucket, version));
     index.write32(sizeof(IndexHeader));
     index.write32(hashlittle(&header, sizeof header, 0));
     index.write(&header, sizeof header);
@@ -441,20 +475,20 @@ namespace NGDP {
 
     uint32 blockPos = index.tell();
     uint32 blockSize = 0;
-    uint32 blockHash = 0;
+    uint32 hashHigh = 0, hashLow = 0;
     index.write32(blockSize);
-    index.write32(blockHash);
+    index.write32(hashHigh);
     for (IndexEntry const& entry : index_) {
       WriteIndexEntry write;
       memcpy(write.hash, entry.hash, sizeof(write.hash));
-      *(uint32*) (write.pos + 1) = _byteswap_ulong(entry.offset);
+      *(uint32*) (write.pos + 1) = __builtin_bswap32(entry.offset);
       write.pos[0] = entry.index / 4;
       write.pos[1] |= ((entry.index & 3) << 6);
       write.size = entry.size;
 
       index.write(&write, sizeof write);
       blockSize += sizeof(write);
-      blockHash = hashlittle(&write, sizeof write, blockHash);
+      hashlittle2(&write, sizeof write, &hashHigh, &hashLow);
     }
 
     while (index.tell() & 3) {
@@ -466,7 +500,8 @@ namespace NGDP {
 
     index.seek(blockPos, SEEK_SET);
     index.write32(blockSize);
-    index.write32(blockHash);
+    index.write32(hashHigh);
+    index.flush();
 
     index_.clear();
   }

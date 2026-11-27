@@ -11,7 +11,11 @@ namespace path {
 
   std::string root();
 
+#ifdef _WIN32
   static const char sep = '\\';
+#else
+  static const char sep = '/';
+#endif
 }
 
 std::string operator / (std::string const& lhs, std::string const& rhs);

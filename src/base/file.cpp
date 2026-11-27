@@ -1,5 +1,6 @@
 #include "file.h"
-#include <windows.h>
+#include <filesystem>
+#include <fnmatch.h>
 #include <set>
 #include <algorithm>
 
@@ -21,10 +22,10 @@ public:
   }
 
   uint64 tell() const {
-    return _ftelli64(file_);
+    return ftello(file_);
   }
   void seek(int64 pos, int mode) {
-    _fseeki64(file_, pos, mode);
+    fseeko(file_, pos, mode);
   }
 
   size_t read(void* ptr, size_t size) {
@@ -32,6 +33,9 @@ public:
   }
   size_t write(void const* ptr, size_t size) {
     return fwrite(ptr, 1, size, file_);
+  }
+  bool flush() {
+    return fflush(file_) == 0 && !ferror(file_);
   }
 };
 
@@ -60,23 +64,16 @@ File::File(char const* name, uint32 mode)
 }
 
 void File::printf(char const* fmt, ...) {
-  static char buf[1024];
-
   va_list ap;
   va_start(ap, fmt);
-
-  int len = _vscprintf(fmt, ap);
-  char* dst;
-  if (len < 1024) {
-    dst = buf;
-  } else {
-    dst = new char[len + 1];
-  }
-  vsprintf(dst, fmt, ap);
-  file_->write(dst, len);
-  if (dst != buf) {
-    delete[] dst;
-  }
+  va_list copy;
+  va_copy(copy, ap);
+  int len = vsnprintf(nullptr, 0, fmt, copy);
+  va_end(copy);
+  std::vector<char> dst(static_cast<size_t>(len) + 1);
+  vsnprintf(dst.data(), dst.size(), fmt, ap);
+  va_end(ap);
+  write(dst.data(), len);
 }
 bool File::getline(std::string& out) {
   out.clear();
@@ -340,6 +337,7 @@ size_t MemoryFile::csize() const {
 }
 
 void File::copy(File& src, uint64 size) {
+  if (!src) throw Exception("copy from invalid file");
   auto mem = dynamic_cast<MemoryBuffer*>(src.file_);
   if (mem) {
     uint64 pos = mem->tell();
@@ -353,6 +351,7 @@ void File::copy(File& src, uint64 size) {
       size -= count;
     }
   }
+  flush();
 }
 #include "checksum.h"
 void File::md5(void* digest) {
@@ -378,22 +377,22 @@ std::string File::md5() {
 }
 
 bool File::exists(char const* path) {
-  return GetFileAttributes(path) != INVALID_FILE_ATTRIBUTES;
+  std::error_code ec;
+  return std::filesystem::exists(path, ec);
 }
 
 FileLoader::SearchResults FileLoader::search(char const* mask) {
-  WIN32_FIND_DATA fdata;
-  HANDLE hFind = FindFirstFile((root / mask).c_str(), &fdata);
   SearchResults results;
-  if (hFind == INVALID_HANDLE_VALUE) return results;
-  do {
-    if (!strcmp(fdata.cFileName, ".") || !strcmp(fdata.cFileName, "..")) continue;
-    if (fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-      results.folders.push_back(fdata.cFileName);
+  std::error_code ec;
+  auto directory = std::filesystem::path(root);
+  for (auto const& entry : std::filesystem::directory_iterator(directory, ec)) {
+    std::string name = entry.path().filename().string();
+    if (name == "." || name == ".." || fnmatch(mask, name.c_str(), 0) != 0) continue;
+    if (entry.is_directory(ec)) {
+      results.folders.push_back(name);
     } else {
-      results.files.push_back(fdata.cFileName);
+      results.files.push_back(name);
     }
-  } while (FindNextFile(hFind, &fdata));
-  FindClose(hFind);
+  }
   return results;
 }

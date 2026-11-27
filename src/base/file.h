@@ -1,10 +1,24 @@
 #pragma once
 
-#include <stdio.h>
+#include <cstdarg>
+#include <cstdio>
 #include "common.h"
+#include "error.h"
 #include "path.h"
 #include <string>
+#ifdef _WIN32
 #include <intrin.h>
+#endif
+
+#ifdef _WIN32
+#define BSWAP16 _byteswap_ushort
+#define BSWAP32 _byteswap_ulong
+#define BSWAP64 _byteswap_uint64
+#else
+#define BSWAP16 __builtin_bswap16
+#define BSWAP32 __builtin_bswap32
+#define BSWAP64 __builtin_bswap64
+#endif
 
 class FileBuffer : public RefCounted {
 public:
@@ -33,6 +47,7 @@ public:
 
   virtual size_t read(void* ptr, size_t size) = 0;
   virtual size_t write(void const* ptr, size_t size) = 0;
+  virtual bool flush() { return true; }
 };
 
 class File {
@@ -67,10 +82,10 @@ public:
     : File(name.c_str(), mode)
   {}
   ~File() {
-    file_->release();
+    if (file_) file_->release();
   }
   void release() {
-    file_->release();
+    if (file_) file_->release();
     file_ = nullptr;
   }
 
@@ -78,7 +93,7 @@ public:
     if (file_ == file.file_) {
       return *this;
     }
-    file_->release();
+    if (file_) file_->release();
     file_ = file.file_;
     if (file_) file_->addref();
     return *this;
@@ -87,7 +102,7 @@ public:
     if (file_ == file.file_) {
       return *this;
     }
-    file_->release();
+    if (file_) file_->release();
     file_ = file.file_;
     file.file_ = nullptr;
     return *this;
@@ -98,76 +113,78 @@ public:
   }
 
   int getc() {
-    return file_->getc();
+    return file_ ? file_->getc() : EOF;
   }
   void putc(int chr) {
-    file_->putc(chr);
+    write(&chr, 1);
   }
 
   void seek(int64 pos, int mode = SEEK_SET) {
-    file_->seek(pos, mode);
+    if (file_) file_->seek(pos, mode);
   }
   uint64 tell() const {
-    return file_->tell();
+    return file_ ? file_->tell() : 0;
   }
   uint64 size() {
-    return file_->size();
+    return file_ ? file_->size() : 0;
   }
 
   size_t read(void* dst, size_t size) {
-    return file_->read(dst, size);
+    return file_ ? file_->read(dst, size) : 0;
   }
   template<class T>
   T read() {
-    T x;
-    file_->read(&x, sizeof(T));
+    T x{};
+    read(&x, sizeof(T));
     return x;
   }
   uint8 read8() {
-    uint8 x;
-    file_->read(&x, 1);
-    return x;
+    return read<uint8>();
   }
   uint16 read16(bool big = false) {
-    uint16 x;
-    file_->read(&x, 2);
-    if (big) x = _byteswap_ushort(x);
+    uint16 x = read<uint16>();
+    if (big) x = BSWAP16(x);
     return x;
   }
   uint32 read32(bool big = false) {
-    uint32 x;
-    file_->read(&x, 4);
-    if (big) x = _byteswap_ulong(x);
+    uint32 x = read<uint32>();
+    if (big) x = BSWAP32(x);
     return x;
   }
   uint64 read64(bool big = false) {
-    uint64 x;
-    file_->read(&x, 8);
-    if (big) x = _byteswap_uint64(x);
+    uint64 x = read<uint64>();
+    if (big) x = BSWAP64(x);
     return x;
   }
 
   size_t write(void const* ptr, size_t size) {
-    return file_->write(ptr, size);
+    if (!file_) throw Exception("write to invalid file");
+    size_t written = file_->write(ptr, size);
+    if (written != size) throw Exception("short write");
+    return written;
   }
   template<class T>
   bool write(T const& x) {
-    return file_->write(&x, sizeof(T)) == sizeof(T);
+    return write(&x, sizeof(T)) == sizeof(T);
   }
   bool write8(uint8 x) {
-    return file_->write(&x, 1) == 1;
+    return write(x);
   }
   bool write16(uint16 x, bool big = false) {
-    if (big) x = _byteswap_ushort(x);
-    return file_->write(&x, 2) == 2;
+    if (big) x = BSWAP16(x);
+    return write(x);
   }
   bool write32(uint32 x, bool big = false) {
-    if (big) x = _byteswap_ulong(x);
-    return file_->write(&x, 4) == 4;
+    if (big) x = BSWAP32(x);
+    return write(x);
   }
   bool write64(uint64 x, bool big = false) {
-    if (big) x = _byteswap_uint64(x);
-    return file_->write(&x, 8) == 8;
+    if (big) x = BSWAP64(x);
+    return write(x);
+  }
+
+  void flush() {
+    if (!file_ || !file_->flush()) throw Exception("failed to flush file");
   }
 
   void printf(char const* fmt, ...);
