@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-WORK="${TMPDIR:-/home/salmon/.hermes/cache/scratch}/blizzget-appimage-build"
+WORK="${TMPDIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/blizzget-appimage-build"
 APPDIR="$WORK/BlizzGet.AppDir"
 OUT="${1:-$ROOT/dist/BlizzGet-Linux-x86_64.AppImage}"
 CASCETTE_COMMIT="dc0dfb89b146d80b363741de25c2be340c2da8fd"

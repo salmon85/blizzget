@@ -22,4 +22,9 @@ jobs:
       - name: Upload release asset
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.ref_name }}" dist/BlizzGet-Linux-x86_64.AppImage --clobber
+        run: |
+          if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+            gh release upload "${{ github.ref_name }}" dist/BlizzGet-Linux-x86_64.AppImage --clobber
+          else
+            gh release create "${{ github.ref_name }}" dist/BlizzGet-Linux-x86_64.AppImage --generate-notes
+          fi
