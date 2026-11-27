@@ -38,6 +38,10 @@ install -Dm644 "$ROOT/linux/blizzget.desktop" \
 install -Dm644 "$ROOT/linux/blizzget.png" "$APPDIR/blizzget.png"
 install -Dm644 "$ROOT/linux/blizzget.png" \
   "$APPDIR/usr/share/icons/hicolor/256x256/apps/blizzget.png"
+install -Dm755 "$ROOT/linux/blizzget_gui.py" \
+  "$APPDIR/usr/share/blizzget/blizzget_gui.py"
+install -Dm644 "$ROOT/linux/blizzget.png" \
+  "$APPDIR/usr/share/blizzget/blizzget.png"
 install -Dm644 "$WORK/cascette-py/LICENSE-MIT" \
   "$APPDIR/usr/share/doc/blizzget/Cascette-LICENSE-MIT"
 install -Dm644 "$WORK/cascette-py/LICENSE-APACHE" \
@@ -46,6 +50,18 @@ install -Dm644 "$WORK/cascette-py/LICENSE-APACHE" \
 printf 'Checking the bundled CLI...\n'
 APPIMAGE_EXTRACT_AND_RUN=1 "$APPDIR/AppRun" --help >/dev/null
 APPIMAGE_EXTRACT_AND_RUN=1 "$APPDIR/AppRun" version
+
+if command -v xvfb-run >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+  printf 'Checking the bundled GUI under Xvfb...\n'
+  set +e
+  timeout 5s xvfb-run -a "$APPDIR/AppRun" --gui >"$WORK/gui-smoke.log" 2>&1
+  gui_status=$?
+  set -e
+  if [ "$gui_status" -ne 124 ]; then
+    cat "$WORK/gui-smoke.log"
+    exit 1
+  fi
+fi
 
 printf 'Downloading appimagetool...\n'
 if command -v gh >/dev/null 2>&1; then

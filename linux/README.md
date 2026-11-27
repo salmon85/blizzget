@@ -10,9 +10,12 @@ game assets and requires ownership of the game.
 
 ## Run
 
+Double-click the AppImage to open the GUI, or run it with arguments for CLI use:
+
 ```bash
 ./BlizzGet-Linux-x86_64.AppImage --help
 ./BlizzGet-Linux-x86_64.AppImage version
+./BlizzGet-Linux-x86_64.AppImage --gui
 ```
 
 Example: download the official Diablo III 2.7.4.84161 client:

@@ -4,4 +4,7 @@ HERE="$(dirname "$(readlink -f "$0")")"
 export PYTHONHOME="$HERE/usr"
 export PYTHONPATH="$HERE/usr/lib/python3.12/site-packages"
 export PATH="$HERE/usr/bin:$PATH"
+if [ "$#" -eq 0 ] || [ "${1:-}" = "--gui" ]; then
+  exec "$HERE/usr/bin/python3.12" "$HERE/usr/share/blizzget/blizzget_gui.py"
+fi
 exec "$HERE/usr/bin/python3.12" -m cascette_tools "$@"
