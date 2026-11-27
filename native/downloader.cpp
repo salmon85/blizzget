@@ -1,4 +1,5 @@
 #include "downloader.h"
+#include "fallback_catalog.h"
 #include "version_sort.h"
 #include "base/error.h"
 #include "base/http.h"
@@ -73,6 +74,17 @@ gint64 jsonInteger(JsonNode* object, char const* name) {
   return json_node_get_int(node);
 }
 
+bool jsonBoolean(JsonNode* object, char const* name) {
+  JsonNode* node = member(object, name);
+  return node && JSON_NODE_HOLDS_VALUE(node) && json_node_get_boolean(node);
+}
+
+bool validProductCode(std::string const& code) {
+  return !code.empty() && std::all_of(code.begin(), code.end(), [](unsigned char c) {
+    return std::isalnum(c) || c == '_' || c == '-';
+  });
+}
+
 JsonParser* parseJson(std::string const& text) {
   GError* error = nullptr;
   JsonParser* parser = json_parser_new();
@@ -107,6 +119,42 @@ std::vector<VersionRecord> parseVersionResult(JsonNode* result, std::string cons
   return records;
 }
 
+std::vector<ProductRecord> parseProductCatalog(std::string const& text) {
+  JsonParser* parser = parseJson(text);
+  JsonNode* root = json_parser_get_root(parser);
+  JsonNode* summaries = member(member(root, "result"), "results");
+  std::vector<ProductRecord> records;
+  if (summaries && JSON_NODE_HOLDS_ARRAY(summaries) && json_array_get_length(json_node_get_array(summaries))) {
+    JsonNode* snapshot = json_array_get_element(json_node_get_array(summaries), 0);
+    JsonNode* products = member(snapshot, "results");
+    if (products && JSON_NODE_HOLDS_ARRAY(products)) {
+      JsonArray* array = json_node_get_array(products);
+      std::unordered_set<std::string> seen;
+      for (guint i = 0; i < json_array_get_length(array); ++i) {
+        JsonNode* entry = json_array_get_element(array, i);
+        if (jsonString(entry, "flags") != "versions") continue;
+        ProductRecord record;
+        record.code = jsonString(entry, "product");
+        record.name = jsonString(entry, "name");
+        record.encrypted = jsonBoolean(entry, "encrypted");
+        if (record.code.empty() || !validProductCode(record.code) ||
+            !seen.insert(record.code).second) continue;
+        if (record.name.empty()) record.name = record.code;
+        records.push_back(std::move(record));
+      }
+    }
+  }
+  g_object_unref(parser);
+  std::sort(records.begin(), records.end(), [](ProductRecord const& a, ProductRecord const& b) {
+    std::string an = a.name, bn = b.name;
+    std::transform(an.begin(), an.end(), an.begin(), [](unsigned char c) { return std::tolower(c); });
+    std::transform(bn.begin(), bn.end(), bn.begin(), [](unsigned char c) { return std::tolower(c); });
+    if (an != bn) return an < bn;
+    return a.code < b.code;
+  });
+  return records;
+}
+
 std::vector<VersionRecord> parseCachedVersions(std::string const& text) {
   std::vector<VersionRecord> records;
   JsonParser* parser = parseJson(text);
@@ -131,6 +179,8 @@ std::vector<VersionRecord> parseCachedVersions(std::string const& text) {
 }
 
 std::string cdnPathForProduct(std::string const& product) {
+  auto fallback = fallbackCdnPaths.find(product);
+  if (fallback != fallbackCdnPaths.end()) return fallback->second;
   static std::map<std::string, std::string> paths = {
       {"d3", "diablo3"}, {"fenris", "diablo4"}, {"osi", "diablo2"},
       {"wow", "wow"}, {"wow_classic", "wow"}, {"wow_classic_era", "wow"},
@@ -329,7 +379,8 @@ void writeBytes(std::string const& path, std::string const& data) {
 }
 
 std::string cachePath(DownloadOptions const& options, std::string const& hash) {
-  return options.cache_dir / "cdn" / cdnPathForProduct(options.product) /
+  std::string cdnPath = options.cdn_path.empty() ? cdnPathForProduct(options.product) : options.cdn_path;
+  return options.cache_dir / "cdn" / cdnPath /
          "data" / hash.substr(0, 2) / hash.substr(2, 4) / hash;
 }
 
@@ -413,6 +464,85 @@ void Downloader::emit() {
     snapshot = progress_;
   }
   if (callback) callback(snapshot);
+}
+
+std::vector<ProductRecord> Downloader::fetchProductCatalog(
+    std::string const& cacheDir, std::function<void(std::string const&)> const& status) {
+  fs::path cacheFile = fs::path(cacheDir) / "catalog" / "summary.json";
+  std::error_code ec;
+  std::string cachedText;
+  if (fs::exists(cacheFile, ec)) {
+    std::ifstream input(cacheFile);
+    cachedText.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    auto age = std::chrono::duration_cast<std::chrono::hours>(
+        fs::file_time_type::clock::now() - fs::last_write_time(cacheFile, ec));
+    if (!ec && age < std::chrono::hours(24)) {
+      auto records = parseProductCatalog(cachedText);
+      status("Loaded " + std::to_string(records.size()) + " products from cached BlizzTrack catalog");
+      return records;
+    }
+  }
+
+  try {
+    status("Updating BlizzTrack product catalog...");
+    File file = fetchFile("https://blizztrack.com/api/summary");
+    std::string text = readAll(file);
+    auto records = parseProductCatalog(text);
+    writeBytes(cacheFile.string(), text);
+    status("Updated catalog: " + std::to_string(records.size()) + " products");
+    return records;
+  } catch (...) {
+    if (!cachedText.empty()) {
+      auto records = parseProductCatalog(cachedText);
+      status("Using cached BlizzTrack catalog: " + std::to_string(records.size()) + " products");
+      return records;
+    }
+    throw;
+  }
+}
+
+std::string parseCdnPath(std::string const& text, std::string const& region) {
+  JsonParser* parser = parseJson(text);
+  JsonNode* data = member(member(json_parser_get_root(parser), "result"), "data");
+  std::string path;
+  if (data && JSON_NODE_HOLDS_ARRAY(data)) {
+    JsonArray* array = json_node_get_array(data);
+    for (guint i = 0; i < json_array_get_length(array); ++i) {
+      JsonNode* entry = json_array_get_element(array, i);
+      if (jsonString(entry, "region") != region) continue;
+      path = jsonString(entry, "path");
+      break;
+    }
+  }
+  g_object_unref(parser);
+  if (path.rfind("tpr/", 0) == 0) path.erase(0, 4);
+  while (!path.empty() && path.back() == '/') path.pop_back();
+  return path;
+}
+
+std::string Downloader::fetchCdnPath(std::string const& product, std::string const& region,
+                                     std::string const& cacheDir) {
+  if (!validProductCode(product) || (region != "us" && region != "eu")) return {};
+  fs::path cacheFile = fs::path(cacheDir) / "cdn-paths" / fs::path(product) / fs::path(region + ".json");
+  std::error_code ec;
+  std::string cachedText;
+  if (fs::exists(cacheFile, ec)) {
+    std::ifstream input(cacheFile);
+    cachedText.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    auto age = std::chrono::duration_cast<std::chrono::hours>(
+        fs::file_time_type::clock::now() - fs::last_write_time(cacheFile, ec));
+    if (!ec && age < std::chrono::hours(24)) return parseCdnPath(cachedText, region);
+  }
+  try {
+    File file = fetchFile("https://blizztrack.com/api/manifest/" + product + "/cdns");
+    std::string text = readAll(file);
+    std::string path = parseCdnPath(text, region);
+    if (!path.empty()) writeBytes(cacheFile.string(), text);
+    return path;
+  } catch (...) {
+    if (!cachedText.empty()) return parseCdnPath(cachedText, region);
+    return {};
+  }
 }
 
 std::vector<VersionRecord> Downloader::fetchVersions(
@@ -553,7 +683,7 @@ void Downloader::run(DownloadOptions const& options) {
   };
 
   try {
-    std::string cdnPath = cdnPathForProduct(options.product);
+    std::string cdnPath = options.cdn_path.empty() ? cdnPathForProduct(options.product) : options.cdn_path;
     std::string base = "https://level3.blizzard.com/tpr/" + cdnPath + "/";
     setStage("Fetching build configuration...");
     std::string cdnText = fetchText(configUrl(base, "config", options.cdn_config));

@@ -15,6 +15,12 @@ struct VersionRecord {
   std::string created_at;
 };
 
+struct ProductRecord {
+  std::string code;
+  std::string name;
+  bool encrypted = false;
+};
+
 struct DownloadOptions {
   std::string product;
   std::string region;
@@ -23,6 +29,7 @@ struct DownloadOptions {
   std::string locale = "enUS";
   std::string build_config;
   std::string cdn_config;
+  std::string cdn_path;
   std::string output_dir;
   std::string cache_dir;
   int global_connections = 48;
@@ -63,6 +70,15 @@ public:
       std::string const& region,
       std::string const& cacheDir,
       std::function<void(std::string const&)> const& status);
+
+  static std::vector<ProductRecord> fetchProductCatalog(
+      std::string const& cacheDir,
+      std::function<void(std::string const&)> const& status);
+
+  static std::string fetchCdnPath(
+      std::string const& product,
+      std::string const& region,
+      std::string const& cacheDir);
 
 private:
   std::atomic<bool> stop_{false};

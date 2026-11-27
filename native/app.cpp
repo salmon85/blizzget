@@ -1,5 +1,6 @@
 #include "cache.h"
 #include "downloader.h"
+#include "fallback_catalog.h"
 
 #include <gtk/gtk.h>
 #include <curl/curl.h>
@@ -10,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -18,23 +20,6 @@
 namespace fs = std::filesystem;
 
 namespace {
-
-struct Product { const char* code; const char* name; };
-constexpr Product products[] = {
-    {"d3", "Diablo III (d3)"},
-    {"wow", "World of Warcraft (wow)"},
-    {"osi", "Diablo II: Resurrected (d2r)"},
-    {"s2", "StarCraft II (sc2)"},
-    {"fenris", "Diablo IV (fenris)"},
-    {"pro", "Overwatch (pro)"},
-    {"hsb", "Hearthstone (hsb)"},
-    {"hero", "Heroes of the Storm (hero)"},
-    {"s1", "StarCraft (s1)"},
-    {"w3", "Warcraft III (w3)"},
-    {"wlby", "Call of Duty (wlby)"},
-    {"agent", "Battle.net Agent (agent)"},
-    {"bna", "Battle.net App (bna)"},
-};
 
 struct App {
   GtkWidget* window = nullptr;
@@ -58,6 +43,10 @@ struct App {
   GtkWidget* pauseButton = nullptr;
   GtkWidget* stopButton = nullptr;
   GtkWidget* refreshButton = nullptr;
+  GtkWidget* catalogButton = nullptr;
+  GtkWidget* showEncryptedCheck = nullptr;
+  GtkWidget* productSearchEntry = nullptr;
+  GtkWidget* productSearchStatus = nullptr;
   GtkWidget* progressBar = nullptr;
   GtkWidget* statusLabel = nullptr;
   GtkWidget* detailLabel = nullptr;
@@ -70,13 +59,22 @@ struct App {
   GtkCssProvider* cssProvider = nullptr;
   std::shared_ptr<Downloader> downloader = std::make_shared<Downloader>();
   std::vector<VersionRecord> versions;
+  std::vector<Product> products;
+  std::vector<ProductRecord> catalogRecords;
+  std::string productBeforeSearch;
+  std::string productSearchQuery;
+  std::map<std::string, std::string> cdnPaths;
   std::thread versionThread;
+  std::thread catalogThread;
+  size_t versionRequestId = 0;
   std::thread downloadThread;
   std::shared_ptr<std::atomic<bool>> downloadFinished = std::make_shared<std::atomic<bool>>(false);
   std::atomic<bool> closing{false};
   std::shared_ptr<std::atomic<bool>> lifetime = std::make_shared<std::atomic<bool>>(false);
   std::atomic<bool> downloading{false};
   std::atomic<bool> versionLoading{false};
+  std::atomic<bool> catalogLoading{false};
+  bool updatingProducts = false;
   uint64_t logCount = 0;
   std::string lastAutoOutput;
   bool dark = true;
@@ -178,6 +176,17 @@ GtkWidget* makeCombo(std::vector<std::string> const& values) {
   return combo;
 }
 
+void limitComboTextWidth(GtkWidget* combo, int width) {
+  gtk_widget_set_size_request(combo, width, -1);
+  gtk_combo_box_set_popup_fixed_width(GTK_COMBO_BOX(combo), TRUE);
+  for (GList* item = gtk_cell_layout_get_cells(GTK_CELL_LAYOUT(combo)); item; item = item->next) {
+    if (GTK_IS_CELL_RENDERER_TEXT(item->data)) {
+      gtk_cell_renderer_set_fixed_size(GTK_CELL_RENDERER(item->data), width - 40, -1);
+      g_object_set(item->data, "ellipsize", PANGO_ELLIPSIZE_END, nullptr);
+    }
+  }
+}
+
 GtkWidget* makeSpin(int min, int max, int value) {
   GtkWidget* spin = gtk_spin_button_new_with_range(min, max, 1);
   gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), value);
@@ -274,8 +283,12 @@ gboolean onProgress(gpointer data) {
 struct VersionResult {
   App* app = nullptr;
   std::shared_ptr<std::atomic<bool>> lifetime;
+  size_t requestId = 0;
   bool ok = false;
   std::string status;
+  std::string product;
+  std::string region;
+  std::string cdnPath;
   std::vector<VersionRecord> records;
 };
 
@@ -283,10 +296,16 @@ gboolean onVersions(gpointer data) {
   std::unique_ptr<VersionResult> result(static_cast<VersionResult*>(data));
   if (*result->lifetime) return G_SOURCE_REMOVE;
   App* app = result->app;
-  if (!app || app->closing) return G_SOURCE_REMOVE;
+  if (!app || app->closing || result->requestId != app->versionRequestId) return G_SOURCE_REMOVE;
+  int productIndex = activeIndex(app->productCombo);
+  if (productIndex < 0 || productIndex >= static_cast<int>(app->products.size())) return G_SOURCE_REMOVE;
+  std::string currentProduct = app->products[productIndex].code;
+  std::string currentRegion = activeIndex(app->regionCombo) == 0 ? "us" : "eu";
+  if (result->product != currentProduct || result->region != currentRegion) return G_SOURCE_REMOVE;
   app->versionLoading = false;
   gtk_widget_set_sensitive(app->refreshButton, TRUE);
   gtk_widget_set_sensitive(app->startButton, TRUE);
+  if (!result->cdnPath.empty()) app->cdnPaths[result->product + "\n" + result->region] = result->cdnPath;
   if (result->ok) {
     app->versions = std::move(result->records);
     gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(app->versionCombo));
@@ -321,21 +340,33 @@ gboolean onStatus(gpointer data) {
 }
 
 void loadVersions(App* app) {
-  if (app->versionLoading || app->closing) return;
+  if (app->closing) return;
+  int productIndex = activeIndex(app->productCombo);
+  if (productIndex < 0 || productIndex >= static_cast<int>(app->products.size())) return;
+  std::string product = app->products[productIndex].code;
+  if (product.empty()) return;
+  if (app->versionLoading) {
+    if (app->versionThread.joinable()) app->versionThread.detach();
+    app->versionLoading = false;
+  }
   app->versionLoading = true;
   gtk_widget_set_sensitive(app->refreshButton, FALSE);
   gtk_widget_set_sensitive(app->startButton, FALSE);
   gtk_label_set_text(GTK_LABEL(app->statusLabel), "Loading version history...");
-  std::string product = products[activeIndex(app->productCombo)].code;
   std::string region = activeIndex(app->regionCombo) == 0 ? "us" : "eu";
   std::string cache = entryText(app->cacheEntry);
   if (app->versionThread.joinable()) app->versionThread.detach();
   auto lifetime = app->lifetime;
-  app->versionThread = std::thread([app, lifetime, product, region, cache] {
+  size_t requestId = ++app->versionRequestId;
+  app->versionThread = std::thread([app, lifetime, product, region, cache, requestId] {
     auto* result = new VersionResult;
     result->app = app;
     result->lifetime = lifetime;
+    result->requestId = requestId;
+    result->product = product;
+    result->region = region;
     try {
+      result->cdnPath = Downloader::fetchCdnPath(product, region, cache);
       result->records = Downloader::fetchVersions(product, region, cache,
           [app, lifetime](std::string const& status) {
             auto* update = new StatusUpdate{app, lifetime, status};
@@ -368,7 +399,7 @@ void selectVersion(App* app) {
   gtk_entry_set_text(GTK_ENTRY(app->buildEntry), record.build_config.c_str());
   gtk_entry_set_text(GTK_ENTRY(app->cdnEntry), record.cdn_config.c_str());
   if (entryText(app->outputEntry) == app->lastAutoOutput) {
-    std::string product = products[activeIndex(app->productCombo)].code;
+    std::string product = app->products[activeIndex(app->productCombo)].code;
     app->lastAutoOutput = homePath("Games/" + product + " " + record.version);
     gtk_entry_set_text(GTK_ENTRY(app->outputEntry), app->lastAutoOutput.c_str());
   }
@@ -378,12 +409,158 @@ void onVersionChanged(GtkComboBox*, gpointer data) { selectVersion(static_cast<A
 
 void onProductChanged(GtkComboBox*, gpointer data) {
   App* app = static_cast<App*>(data);
+  if (app->updatingProducts) return;
   gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(app->versionCombo));
   app->versions.clear();
   loadVersions(app);
 }
 
 void onRefresh(GtkButton*, gpointer data) { loadVersions(static_cast<App*>(data)); }
+
+std::string repopulateProductCombo(App* app, std::string const& selected) {
+  app->updatingProducts = true;
+  gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(app->productCombo));
+  if (app->products.empty()) {
+    gtk_combo_box_set_active(GTK_COMBO_BOX(app->productCombo), -1);
+    limitComboTextWidth(app->productCombo, 300);
+    app->updatingProducts = false;
+    return "";
+  }
+  int selectedIndex = 0;
+  for (size_t i = 0; i < app->products.size(); ++i) {
+    std::string label = app->products[i].encrypted ? "(encrypted) " : "";
+    label += app->products[i].name;
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->productCombo), label.c_str());
+    if (app->products[i].code == selected) selectedIndex = static_cast<int>(i);
+  }
+  gtk_combo_box_set_active(GTK_COMBO_BOX(app->productCombo), selectedIndex);
+  limitComboTextWidth(app->productCombo, 300);
+  app->updatingProducts = false;
+  return app->products[selectedIndex].code;
+}
+
+std::string currentProductCode(App* app) {
+  int index = activeIndex(app->productCombo);
+  return index >= 0 && index < static_cast<int>(app->products.size()) ? app->products[index].code : "";
+}
+
+bool hasProductSearchQuery(App* app) {
+  std::string query = gtk_entry_get_text(GTK_ENTRY(app->productSearchEntry));
+  return query.find_first_not_of(" \t\r\n") != std::string::npos;
+}
+
+void clearProductVersions(App* app) {
+  ++app->versionRequestId;
+  if (app->versionLoading) {
+    if (app->versionThread.joinable()) app->versionThread.detach();
+    app->versionLoading = false;
+    gtk_widget_set_sensitive(app->refreshButton, TRUE);
+  }
+  gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(app->versionCombo));
+  gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(app->versionCombo), "Select a product");
+  gtk_combo_box_set_active(GTK_COMBO_BOX(app->versionCombo), 0);
+  app->versions.clear();
+  gtk_widget_set_sensitive(app->startButton, FALSE);
+}
+
+std::string rebuildProductList(App* app) {
+  std::string selected = currentProductCode(app);
+  std::vector<Product> fallback(std::begin(fallbackProducts), std::end(fallbackProducts));
+  bool showEncrypted = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(app->showEncryptedCheck));
+  app->products = mergeProductCatalog(fallback, app->catalogRecords, showEncrypted);
+  if (hasProductSearchQuery(app)) app->products = filterProducts(app->products, gtk_entry_get_text(GTK_ENTRY(app->productSearchEntry)));
+  std::string actual = repopulateProductCombo(app, selected);
+  if (app->productSearchStatus) {
+    std::string status = std::to_string(app->products.size()) + (app->products.size() == 1 ? " product" : " products");
+    if (app->products.empty()) status = "No matches";
+    gtk_label_set_text(GTK_LABEL(app->productSearchStatus), status.c_str());
+  }
+  if (hasProductSearchQuery(app) && actual != selected) clearProductVersions(app);
+  return actual;
+}
+
+struct CatalogResult {
+  App* app = nullptr;
+  std::shared_ptr<std::atomic<bool>> lifetime;
+  bool ok = false;
+  std::string status;
+  std::vector<ProductRecord> records;
+};
+
+gboolean onCatalog(gpointer data) {
+  std::unique_ptr<CatalogResult> result(static_cast<CatalogResult*>(data));
+  if (*result->lifetime) return G_SOURCE_REMOVE;
+  App* app = result->app;
+  if (!app || app->closing) return G_SOURCE_REMOVE;
+  app->catalogLoading = false;
+  gtk_widget_set_sensitive(app->catalogButton, TRUE);
+  if (result->ok) {
+    std::string selected = currentProductCode(app);
+    app->catalogRecords = std::move(result->records);
+    std::string actual = rebuildProductList(app);
+    if (actual != selected && !hasProductSearchQuery(app)) {
+      gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(app->versionCombo));
+      app->versions.clear();
+      loadVersions(app);
+    }
+  }
+  gtk_label_set_text(GTK_LABEL(app->statusLabel), result->status.c_str());
+  appendConsole(app, result->status);
+  return G_SOURCE_REMOVE;
+}
+
+void refreshCatalog(App* app) {
+  if (app->catalogLoading || app->closing) return;
+  app->catalogLoading = true;
+  gtk_widget_set_sensitive(app->catalogButton, FALSE);
+  std::string cache = entryText(app->cacheEntry);
+  if (app->catalogThread.joinable()) app->catalogThread.detach();
+  auto lifetime = app->lifetime;
+  app->catalogThread = std::thread([app, lifetime, cache] {
+    auto* result = new CatalogResult;
+    result->app = app;
+    result->lifetime = lifetime;
+    try {
+      result->records = Downloader::fetchProductCatalog(cache, [](std::string const&) {});
+      result->ok = true;
+      result->status = "BlizzTrack catalog updated: " + std::to_string(result->records.size()) + " products";
+    } catch (std::exception const& ex) {
+      result->status = std::string("Catalog update failed: ") + ex.what();
+    } catch (...) {
+      result->status = "Catalog update failed";
+    }
+    g_idle_add(onCatalog, result);
+  });
+}
+
+void onCatalogButton(GtkButton*, gpointer data) { refreshCatalog(static_cast<App*>(data)); }
+
+void onShowEncryptedToggled(GtkToggleButton*, gpointer data) {
+  App* app = static_cast<App*>(data);
+  std::string selected = currentProductCode(app);
+  std::string actual = rebuildProductList(app);
+  if (actual != selected && !hasProductSearchQuery(app)) {
+    gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(app->versionCombo));
+    app->versions.clear();
+    loadVersions(app);
+  }
+}
+
+void onProductSearchChanged(GtkEditable*, gpointer data) {
+  App* app = static_cast<App*>(data);
+  bool wasSearching = app->productSearchQuery.find_first_not_of(" \t\r\n") != std::string::npos;
+  std::string selected = currentProductCode(app);
+  app->productSearchQuery = gtk_entry_get_text(GTK_ENTRY(app->productSearchEntry));
+  bool isSearching = hasProductSearchQuery(app);
+  if (!wasSearching && isSearching) app->productBeforeSearch = selected;
+  rebuildProductList(app);
+  if (!isSearching) {
+    std::string restore = app->productBeforeSearch.empty() ? selected : app->productBeforeSearch;
+    std::string actual = repopulateProductCombo(app, restore);
+    if (actual.empty()) clearProductVersions(app);
+    else loadVersions(app);
+  }
+}
 
 void onTheme(GtkButton*, gpointer data) {
   App* app = static_cast<App*>(data);
@@ -418,6 +595,7 @@ void onBrowseCache(GtkButton*, gpointer data) {
   if (!path.empty()) {
     gtk_entry_set_text(GTK_ENTRY(app->cacheEntry), path.c_str());
     loadVersions(app);
+    refreshCatalog(app);
   }
 }
 
@@ -476,8 +654,10 @@ void startDownload(App* app) {
   }
 
   DownloadOptions options;
-  options.product = products[activeIndex(app->productCombo)].code;
+  options.product = app->products[activeIndex(app->productCombo)].code;
   options.region = activeIndex(app->regionCombo) == 0 ? "us" : "eu";
+  auto pathIt = app->cdnPaths.find(options.product + "\n" + options.region);
+  if (pathIt != app->cdnPaths.end()) options.cdn_path = pathIt->second;
   options.platform = activeIndex(app->platformCombo) == 0 ? "Windows" : "OSX";
   options.arch = activeIndex(app->archCombo) == 0 ? "x86_64" : "x86";
   options.locale = comboText(app->localeCombo);
@@ -544,6 +724,7 @@ gboolean finishCloseAfterDownload(gpointer data) {
   app->closing = true;
   *app->lifetime = true;
   if (app->versionThread.joinable()) app->versionThread.detach();
+  if (app->catalogThread.joinable()) app->catalogThread.detach();
   delete state;
   gtk_main_quit();
   return G_SOURCE_REMOVE;
@@ -601,6 +782,7 @@ gboolean onDelete(GtkWidget*, GdkEvent*, gpointer data) {
     if (!clearBlizzgetCache(cachePath, clearError)) showError(app, clearError.c_str());
   }
   if (app->versionThread.joinable()) app->versionThread.detach();
+  if (app->catalogThread.joinable()) app->catalogThread.detach();
   gtk_main_quit();
   return FALSE;
 }
@@ -699,15 +881,35 @@ GtkWidget* buildUi(App* app) {
   GtkWidget* buildHeading = makeBox(GTK_ORIENTATION_HORIZONTAL, 10);
   gtk_box_pack_start(GTK_BOX(buildPanel), buildHeading, FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(buildHeading), makeLabel("1. BUILD SELECTION", "section"), FALSE, FALSE, 0);
+  app->showEncryptedCheck = gtk_check_button_new_with_label("Show encrypted products");
+  gtk_box_pack_start(GTK_BOX(buildHeading), app->showEncryptedCheck, FALSE, FALSE, 0);
+  g_signal_connect(app->showEncryptedCheck, "toggled", G_CALLBACK(onShowEncryptedToggled), app);
+  app->catalogButton = makeButton("⇩  Update Catalog", G_CALLBACK(onCatalogButton), app);
+  gtk_box_pack_end(GTK_BOX(buildHeading), app->catalogButton, FALSE, FALSE, 0);
   app->refreshButton = makeButton("↻  Refresh", G_CALLBACK(onRefresh), app);
   gtk_box_pack_end(GTK_BOX(buildHeading), app->refreshButton, FALSE, FALSE, 0);
+
+  GtkWidget* productSearchRow = makeBox(GTK_ORIENTATION_HORIZONTAL, 10);
+  gtk_box_pack_start(GTK_BOX(buildPanel), productSearchRow, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(productSearchRow), makeLabel("Search", "field"), FALSE, FALSE, 0);
+  app->productSearchEntry = gtk_search_entry_new();
+  gtk_widget_set_hexpand(app->productSearchEntry, TRUE);
+  gtk_widget_set_size_request(app->productSearchEntry, 360, -1);
+  gtk_entry_set_placeholder_text(GTK_ENTRY(app->productSearchEntry), "Search by product name or code");
+  gtk_box_pack_start(GTK_BOX(productSearchRow), app->productSearchEntry, TRUE, TRUE, 0);
+  app->productSearchStatus = makeLabel("", "muted");
+  gtk_widget_set_size_request(app->productSearchStatus, 90, -1);
+  gtk_box_pack_end(GTK_BOX(productSearchRow), app->productSearchStatus, FALSE, FALSE, 0);
+  g_signal_connect(app->productSearchEntry, "changed", G_CALLBACK(onProductSearchChanged), app);
 
   GtkWidget* fields = gtk_grid_new();
   gtk_grid_set_column_spacing(GTK_GRID(fields), 16);
   gtk_grid_set_row_spacing(GTK_GRID(fields), 6);
   gtk_box_pack_start(GTK_BOX(buildPanel), fields, FALSE, FALSE, 0);
+  app->products.assign(std::begin(fallbackProducts), std::end(fallbackProducts));
+  gtk_label_set_text(GTK_LABEL(app->productSearchStatus), (std::to_string(app->products.size()) + " products").c_str());
   std::vector<std::string> productNames;
-  for (auto const& product : products) productNames.emplace_back(product.name);
+  for (auto const& product : app->products) productNames.emplace_back(product.name);
   app->productCombo = makeCombo(productNames);
   app->regionCombo = makeCombo({"US", "EU"});
   app->versionCombo = makeCombo({"Loading..."});
@@ -723,7 +925,7 @@ GtkWidget* buildUi(App* app) {
   addField(fields, "Locale", app->localeCombo, 3);
   addField(fields, "Platform", app->platformCombo, 4);
   addField(fields, "Arch", app->archCombo, 5);
-  gtk_widget_set_size_request(app->productCombo, 210, -1);
+  limitComboTextWidth(app->productCombo, 300);
   gtk_widget_set_size_request(app->regionCombo, 90, -1);
   gtk_widget_set_size_request(app->versionCombo, 230, -1);
   gtk_widget_set_size_request(app->localeCombo, 105, -1);
@@ -855,6 +1057,7 @@ int main(int argc, char** argv) {
   GtkWidget* window = buildUi(&app);
   gtk_widget_show_all(window);
   loadVersions(&app);
+  refreshCatalog(&app);
   gtk_main();
   return 0;
 }

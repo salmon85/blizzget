@@ -12,8 +12,12 @@ int main() {
   fs::remove_all(root, ec);
   fs::create_directories(root / "cdn");
   fs::create_directories(root / "versions");
+  fs::create_directories(root / "catalog");
+  fs::create_directories(root / "cdn-paths");
   std::ofstream(root / "cdn" / "cached.bin") << "cache";
   std::ofstream(root / "versions" / "us.json") << "[]";
+  std::ofstream(root / "catalog" / "summary.json") << "{}";
+  std::ofstream(root / "cdn-paths" / "path.json") << "{}";
   std::ofstream(root / "unrelated.txt") << "keep";
 
   std::string error;
@@ -21,7 +25,8 @@ int main() {
     std::cerr << error << "\n";
     return 1;
   }
-  if (fs::exists(root / "cdn") || fs::exists(root / "versions")) {
+  if (fs::exists(root / "cdn") || fs::exists(root / "versions") ||
+      fs::exists(root / "catalog") || fs::exists(root / "cdn-paths")) {
     std::cerr << "BlizzGet cache contents were not removed\n";
     return 1;
   }

@@ -15,6 +15,15 @@ Double-click the AppImage, or run:
 ./BlizzGet-Linux-x86_64.AppImage
 ```
 
+The Product dropdown uses a bundled fallback catalog of verified unencrypted
+products and automatically merges the latest catalog from BlizzTrack. The
+adjacent search field filters by product name or code as you type; clearing it
+restores the previous selection. Encrypted products are hidden by default;
+enable **Show encrypted products** to display them. Use **Update Catalog** to
+refresh manually. The live catalog and per-product CDN paths are cached for
+24 hours; if BlizzTrack is unavailable, the expanded bundled fallback remains
+usable.
+
 The Version dropdown loads historical versions indexed by BlizzTrack for the
 selected game and region. The list is cached locally and can be refreshed with
 the Refresh button. Advanced exposes manual build/CDN hashes.
@@ -22,11 +31,11 @@ the Refresh button. Advanced exposes manual build/CDN hashes.
 The dark/light button switches themes. Download connection limits and speed
 caps are configurable. The defaults are 48 global connections and 12 per host.
 
-The Cache directory field controls both the CDN archive cache and cached
-version lists. It defaults to `~/.cache/cascette`. Enable Clear cache on close
-to remove BlizzGet's `cdn` and `versions` cache contents after the downloader
-has stopped. BlizzGet asks for confirmation and preserves unrelated files in
-the selected directory.
+The Cache directory field controls the CDN archive cache, cached version lists,
+BlizzTrack catalog, and resolved CDN paths. It defaults to `~/.cache/cascette`.
+Enable Clear cache on close to remove BlizzGet's `cdn`, `versions`, `catalog`,
+and `cdn-paths` cache contents after the downloader has stopped. BlizzGet asks
+for confirmation and preserves unrelated files in the selected directory.
 
 ## Build locally
 

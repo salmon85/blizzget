@@ -94,6 +94,26 @@ if(BUILD_TESTING)
   target_include_directories(cache_clear_test PRIVATE .)
   add_test(NAME cache_clear_preserves_unrelated COMMAND cache_clear_test)
 
+  add_executable(product_merge_test
+    tests/product_merge_test.cpp
+    cache.cpp
+  )
+  target_include_directories(product_merge_test PRIVATE .)
+  add_test(NAME product_catalog_merge COMMAND product_merge_test)
+
+  add_executable(fallback_catalog_test
+    tests/fallback_catalog_test.cpp
+  )
+  target_include_directories(fallback_catalog_test PRIVATE .)
+  add_test(NAME expanded_fallback_catalog COMMAND fallback_catalog_test)
+
+  add_executable(product_search_test
+    tests/product_search_test.cpp
+    cache.cpp
+  )
+  target_include_directories(product_search_test PRIVATE .)
+  add_test(NAME product_search COMMAND product_search_test)
+
   add_executable(version_sort_test
     tests/version_sort_test.cpp
     version_sort.cpp
@@ -118,4 +138,22 @@ if(BUILD_TESTING)
   target_link_libraries(version_cache_sort_test PRIVATE PkgConfig::GTK3 PkgConfig::JSONGLIB)
   target_link_libraries(version_cache_sort_test PRIVATE ${SYSTEM_CURL_LIBRARY} ${LZ4_LIBRARY} ${ZLIB_LIBRARY})
   add_test(NAME cached_versions_newest_first COMMAND version_cache_sort_test)
+
+  add_executable(product_catalog_test
+    tests/product_catalog_test.cpp
+    downloader.cpp
+    version_sort.cpp
+    ../src/base/checksum.cpp
+    ../src/base/common.cpp
+    ../src/base/error.cpp
+    ../src/base/file.cpp
+    ../src/base/http.cpp
+    ../src/base/path.cpp
+    ../src/base/string.cpp
+    ../src/ngdp.cpp
+  )
+  target_include_directories(product_catalog_test PRIVATE . ../src)
+  target_link_libraries(product_catalog_test PRIVATE PkgConfig::GTK3 PkgConfig::JSONGLIB)
+  target_link_libraries(product_catalog_test PRIVATE ${SYSTEM_CURL_LIBRARY} ${LZ4_LIBRARY} ${ZLIB_LIBRARY})
+  add_test(NAME blizztrack_product_catalog COMMAND product_catalog_test)
 endif()
