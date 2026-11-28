@@ -176,7 +176,7 @@ int main() {
   if (bytesPerSecond(1000, 0.0) != 0) return 1;
   if (cascWorkerCount(48, 662512) != 8) return 1;
   if (cascWorkerCount(2, 100) != 2) return 1;
-  fs::path retryPath = "/home/salmon/.hermes/cache/scratch/blizzget-loose-retry-test.bin";
+  fs::path retryPath = cache / "blizzget-loose-retry-test.bin";
   fs::remove(retryPath);
   std::atomic<int> fetchAttempts{0};
   auto flakyFetch = [&](std::string const& destination, uint64_t offset) {
@@ -232,7 +232,7 @@ int main() {
     close(client);
   });
   std::string localUrl = "http://127.0.0.1:" + std::to_string(ntohs(address.sin_port)) + "/";
-  fs::path downloadDest = "/home/salmon/.hermes/cache/scratch/blizzget-http-download-dest.bin";
+  fs::path downloadDest = cache / "blizzget-http-download-dest.bin";
   for (int i = 0; i < 2; ++i) {
     HttpRequest request(localUrl);
     if (!request.download(downloadDest.string())) { std::cerr << "http download failed: " << request.error() << "\n"; return 1; }

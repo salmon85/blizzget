@@ -19,7 +19,7 @@ static std::vector<uint8_t> readAll(fs::path const& path) {
 }
 
 int main() {
-  fs::path root = "/home/salmon/.hermes/cache/scratch/blizzget-data-storage-thread-test";
+  fs::path root = fs::temp_directory_path() / "blizzget-data-storage-thread-test";
   std::error_code ec;
   fs::remove_all(root, ec);
   fs::create_directories(root);
