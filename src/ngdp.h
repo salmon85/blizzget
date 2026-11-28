@@ -85,7 +85,7 @@ namespace NGDP {
   };
 
   File DecodeBLTE(File& blte, uint32 usize = 0);
-  File DecodeBLTE(File&& blte, uint32 usize = 0) {
+  inline File DecodeBLTE(File&& blte, uint32 usize = 0) {
     return DecodeBLTE(blte, usize);
   }
   typedef std::map<std::string, std::string> ConfigFile;
@@ -94,6 +94,7 @@ namespace NGDP {
   class Encoding {
   public:
     Encoding(File& file);
+    Encoding(File&& file) : Encoding(file) {}
 
 #pragma pack(push, 1)
     struct EncodingEntry {
