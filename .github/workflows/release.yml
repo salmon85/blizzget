@@ -41,25 +41,25 @@ jobs:
       - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: UCRT64
+          msystem: MINGW32
           update: true
           install: >-
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-curl
-            mingw-w64-ucrt-x86_64-zlib
-            mingw-w64-ucrt-x86_64-lz4
-            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-i686-gcc
+            mingw-w64-i686-curl
+            mingw-w64-i686-zlib
+            mingw-w64-i686-lz4
+            mingw-w64-i686-pkgconf
           path-type: inherit
       - name: Build Windows executable
         shell: msys2 {0}
         run: |
           chmod +x windows/build-windows.sh
           ./windows/build-windows.sh
-          cp dist/BlizzGet.exe dist/BlizzGet-Windows-x86_64.exe
+          cp dist/BlizzGet.exe dist/BlizzGet-Windows-x86.exe
       - uses: actions/upload-artifact@v4
         with:
-          name: BlizzGet-Windows-x86_64.exe
-          path: dist/BlizzGet-Windows-x86_64.exe
+          name: BlizzGet-Windows-x86.exe
+          path: dist/BlizzGet-Windows-x86.exe
           if-no-files-found: error
 
   release:
@@ -79,12 +79,12 @@ jobs:
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" \
               dist/BlizzGet-Linux-x86_64.AppImage \
-              dist/BlizzGet-Windows-x86_64.exe --clobber
+              dist/BlizzGet-Windows-x86.exe --clobber
             gh release edit "$RELEASE_TAG" --title "BlizzGet $RELEASE_TAG"
           else
             gh release create "$RELEASE_TAG" \
               dist/BlizzGet-Linux-x86_64.AppImage \
-              dist/BlizzGet-Windows-x86_64.exe \
+              dist/BlizzGet-Windows-x86.exe \
               --target "$GITHUB_SHA" \
               --title "BlizzGet $RELEASE_TAG" --generate-notes
           fi

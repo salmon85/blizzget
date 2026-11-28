@@ -1,6 +1,13 @@
 #include "file.h"
 #include <filesystem>
+#ifdef _WIN32
+#include <shlwapi.h>
+static int fnmatch(char const* mask, char const* name, int) {
+  return PathMatchSpecA(name, mask) ? 0 : 1;
+}
+#else
 #include <fnmatch.h>
+#endif
 #include <set>
 #include <algorithm>
 

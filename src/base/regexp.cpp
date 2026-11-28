@@ -67,15 +67,15 @@ static void _addchar(std::string& res, char chr) {
 
 std::string CharacterClass::format() const {
   bool chrmap[256];
-  int has = 0, not = 0;
+  int has = 0, neg = 0;
   for (uint32 cp = 32; cp <= 126; ++cp) {
     chrmap[cp] = match(cp);
     has += (chrmap[cp] == true);
-    not += (chrmap[cp] == false);
+    neg += (chrmap[cp] == false);
   }
-  if (!not) return ".";
+  if (!neg) return ".";
   std::string res("[");
-  if (has > not) {
+  if (has > neg) {
     res.push_back('^');
     for (uint32 cp = 32; cp <= 126; ++cp) {
       chrmap[cp] = !chrmap[cp];

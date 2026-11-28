@@ -17,6 +17,8 @@
 #define M_UNHANDLED       0x80000000
 #define FM_SHUTDOWN       0x7F000001
 
+class RootFrame;
+
 class Frame {
   // master frame data
   friend class RootFrame;

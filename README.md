@@ -24,7 +24,7 @@ release contains no Python or Tkinter wrapper.
 
 ## Windows release
 
-The release includes `BlizzGet-Windows-x86_64.exe`, a standalone 64-bit build
+The release includes `BlizzGet-Windows-x86.exe`, a standalone 32-bit build
 of the upstream Win32 GUI. Run it directly; no extra runtime or installer is
 required.
 

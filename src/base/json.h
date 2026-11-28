@@ -27,17 +27,12 @@ private:
     bool bool_;
   };
 public:
-  typedef std::map<std::string, Value> Map;
-  typedef std::vector<Value> Array;
-
   Value(Type type = tUndefined);
   ~Value() {
     clear();
   }
 
   Value(bool val);
-  Value(int val);
-  Value(unsigned int val);
   Value(sint32 val);
   Value(uint32 val);
   Value(sint64 val);

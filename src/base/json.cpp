@@ -21,23 +21,6 @@ Value::Value(bool val)
   setType(tBoolean);
   bool_ = val;
 }
-Value::Value(int val)
-  : type_(tUndefined)
-{
-  setType(tInteger);
-  int_ = val;
-}
-Value::Value(unsigned int val)
-  : type_(tUndefined)
-{
-  if (val > 0x7FFFFFFF) {
-    setType(tNumber);
-    number_ = static_cast<double>(val);
-  } else {
-    setType(tInteger);
-    int_ = static_cast<int>(val);
-  }
-}
 Value::Value(sint32 val)
   : type_(tUndefined)
 {

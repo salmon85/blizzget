@@ -41,7 +41,7 @@ sources=(
 
 curl_libs="$(pkg-config --static --libs libcurl)"
 "$CXX" -std=gnu++17 -O2 -DUNICODE -D_UNICODE -mwindows \
-  -I src -I libs/lz4 -I libs/zlib \
+  -I src -I vc13 -I libs/lz4 -I libs/zlib \
   "${sources[@]}" \
   $curl_libs -lz -llz4 \
   -lcomctl32 -lole32 -luuid -loleaut32 -lshlwapi -lws2_32 -lcrypt32 \
