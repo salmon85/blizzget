@@ -64,19 +64,54 @@ void HttpRequest::addData(std::string const& key, std::string const& value) {
   post_.append(urlencode(value));
 }
 
-bool HttpRequest::send() {
-  CURL* curl = curl_easy_init();
-  if (!curl) return false;
+namespace {
+size_t writeFile(char* ptr, size_t size, size_t count, void* userdata) {
+  auto* output = static_cast<FILE*>(userdata);
+  size_t bytes = size * count;
+  return fwrite(ptr, 1, bytes, output) == bytes ? bytes : 0;
+}
 
-  body_.clear();
+struct ThreadCurl {
+  CURL* handle = nullptr;
+  ~ThreadCurl() {
+    if (handle) curl_easy_cleanup(handle);
+  }
+};
+
+ThreadCurl& threadCurl() {
+  static thread_local ThreadCurl curl;
+  return curl;
+}
+}
+
+bool HttpRequest::perform(std::string* body, FILE* output) {
+  CURL* curl = threadCurl().handle;
+  if (!curl) {
+    curl = curl_easy_init();
+    if (!curl) return false;
+    threadCurl().handle = curl;
+  } else {
+    curl_easy_reset(curl);
+  }
+
+  if (body) body->clear();
   responseHeaders_.clear();
+  status_ = 0;
   curl_easy_setopt(curl, CURLOPT_URL, url_.c_str());
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
   curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 8L);
   curl_easy_setopt(curl, CURLOPT_USERAGENT, "BlizzGet-Native/1.2");
   curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeBody);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body_);
+  curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+  curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
+  curl_easy_setopt(curl, CURLOPT_MAXCONNECTS, 8L);
+  if (output) {
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeFile);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, output);
+  } else {
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeBody);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, body);
+  }
   curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, writeHeaders);
   curl_easy_setopt(curl, CURLOPT_HEADERDATA, &responseHeaders_);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_);
@@ -97,13 +132,28 @@ bool HttpRequest::send() {
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transferProgress);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress_);
+  } else {
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
   }
 
   CURLcode result = curl_easy_perform(curl);
+  error_ = curl_easy_strerror(result);
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status_);
   if (list) curl_slist_free_all(list);
-  curl_easy_cleanup(curl);
   return result == CURLE_OK;
+}
+
+bool HttpRequest::send() {
+  return perform(&body_, nullptr);
+}
+
+bool HttpRequest::download(std::string const& path, uint64_t resumeOffset) {
+  FILE* output = fopen(path.c_str(), resumeOffset ? "ab" : "wb");
+  if (!output) return false;
+  if (resumeOffset) addHeader("Range", "bytes=" + std::to_string(resumeOffset) + "-");
+  bool ok = perform(nullptr, output);
+  ok = fclose(output) == 0 && ok;
+  return ok;
 }
 
 uint32 HttpRequest::status() {

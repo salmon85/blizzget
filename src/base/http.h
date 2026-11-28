@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdio>
 #include <functional>
 #include <map>
 #include <string>
@@ -21,13 +22,16 @@ public:
   }
 
   bool send();
+  bool download(std::string const& path, uint64_t resumeOffset = 0);
   uint32 status();
+  std::string const& error() const { return error_; }
   std::map<std::string, std::string> headers();
   File response();
 
   static File get(std::string const& url);
 
 private:
+  bool perform(std::string* body, FILE* output);
   std::string url_;
   RequestType type_;
   std::vector<std::string> headers_;
@@ -36,5 +40,6 @@ private:
   long timeout_ = 60;
   std::map<std::string, std::string> responseHeaders_;
   std::string body_;
+  std::string error_;
   std::function<void(uint64, uint64)> progress_;
 };

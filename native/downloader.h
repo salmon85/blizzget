@@ -36,12 +36,19 @@ struct DownloadOptions {
   int per_host_connections = 12;
   uint64_t speed_cap = 0;
   size_t max_files = 0; // Native test hook; 0 means all selected files.
+  bool skip_optional = false; // Skip optional high-resolution assets (priority 2).
+  bool entire_cdn = false; // Download every entry for the build, ignoring tags and priority.
 };
 
 struct ProgressSnapshot {
   std::string stage;
   uint64_t files_total = 0;
   uint64_t files_done = 0;
+  uint64_t casc_files_total = 0;
+  uint64_t casc_files_done = 0;
+  uint64_t casc_eta_seconds = UINT64_MAX;
+  uint64_t casc_bytes_done = 0;
+  uint64_t casc_bytes_per_second = 0;
   uint64_t bytes_total = 0;
   uint64_t bytes_done = 0;
   uint64_t bytes_per_second = 0;
@@ -52,6 +59,8 @@ struct ProgressSnapshot {
   bool finished = false;
   bool failed = false;
 };
+
+double progressFraction(ProgressSnapshot const& snapshot);
 
 class Downloader {
 public:

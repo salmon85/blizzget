@@ -36,6 +36,8 @@ struct App {
   GtkWidget* outputEntry = nullptr;
   GtkWidget* cacheEntry = nullptr;
   GtkWidget* clearCacheCheck = nullptr;
+  GtkWidget* skipOptionalCheck = nullptr;
+  GtkWidget* entireCdnCheck = nullptr;
   GtkWidget* globalSpin = nullptr;
   GtkWidget* perHostSpin = nullptr;
   GtkWidget* speedCombo = nullptr;
@@ -254,19 +256,29 @@ gboolean onProgress(gpointer data) {
   }
   if (!snapshot.stage.empty()) gtk_label_set_text(GTK_LABEL(app->statusLabel), snapshot.stage.c_str());
   gtk_label_set_text(GTK_LABEL(app->estimateLabel),
-      ("Est. Size: " + formatBytes(snapshot.bytes_total)).c_str());
-  double fraction = snapshot.bytes_total
-      ? static_cast<double>(snapshot.bytes_done) / static_cast<double>(snapshot.bytes_total) : 0.0;
+      snapshot.bytes_total ? ("Est. Size: " + formatBytes(snapshot.bytes_total)).c_str() : "Est. Size: --");
+  double fraction = progressFraction(snapshot);
   gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(app->progressBar), std::clamp(fraction, 0.0, 1.0));
   char percent[32];
   snprintf(percent, sizeof percent, "%.1f%%", fraction * 100.0);
   gtk_progress_bar_set_text(GTK_PROGRESS_BAR(app->progressBar), percent);
 
-  std::string details = formatBytes(snapshot.bytes_done) + " / " + formatBytes(snapshot.bytes_total);
-  if (snapshot.bytes_per_second) details += " • " + formatBytes(snapshot.bytes_per_second) + "/s";
-  if (snapshot.eta_seconds != UINT64_MAX) details += " • " + formatDuration(snapshot.eta_seconds) + " remaining";
-  if (snapshot.files_total) details += " • " + std::to_string(snapshot.files_done) + "/" +
-                                       std::to_string(snapshot.files_total) + " files";
+  std::string details;
+  if (snapshot.casc_files_total) {
+    details = "CASC " + std::to_string(snapshot.casc_files_done) + "/" +
+              std::to_string(snapshot.casc_files_total);
+    if (snapshot.casc_bytes_done) details += " • " + formatBytes(snapshot.casc_bytes_done);
+    if (snapshot.casc_bytes_per_second) details += " • " + formatBytes(snapshot.casc_bytes_per_second) + "/s";
+    if (snapshot.casc_eta_seconds != UINT64_MAX) details += " • " + formatDuration(snapshot.casc_eta_seconds) + " remaining";
+  } else {
+    if (snapshot.bytes_total) details = formatBytes(snapshot.bytes_done) + " / " + formatBytes(snapshot.bytes_total);
+    else if (snapshot.files_total) details = std::to_string(snapshot.files_done) + " / " + std::to_string(snapshot.files_total) + " files";
+    else details = "0 B / 0 B";
+    if (snapshot.bytes_per_second) details += " • " + formatBytes(snapshot.bytes_per_second) + "/s";
+    if (snapshot.eta_seconds != UINT64_MAX) details += " • " + formatDuration(snapshot.eta_seconds) + " remaining";
+    if (snapshot.files_total && snapshot.bytes_total) details += " • " + std::to_string(snapshot.files_done) + "/" +
+                                         std::to_string(snapshot.files_total) + " files";
+  }
   gtk_label_set_text(GTK_LABEL(app->detailLabel), details.c_str());
 
   if (snapshot.finished || snapshot.failed) {
@@ -670,6 +682,8 @@ void startDownload(App* app) {
   int speedIndex = activeIndex(app->speedCombo);
   const int speeds[] = {0, 5, 15, 30, 50};
   options.speed_cap = speedIndex >= 0 && speedIndex < 5 ? static_cast<uint64_t>(speeds[speedIndex]) * 1024 * 1024 : 0;
+  options.skip_optional = !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(app->skipOptionalCheck));
+  options.entire_cdn = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(app->entireCdnCheck));
 
   app->downloading = true;
   app->logCount = 0;
@@ -977,11 +991,33 @@ GtkWidget* buildUi(App* app) {
   gtk_grid_attach(GTK_GRID(form), cacheBrowse, 2, 1, 1, 1);
   app->clearCacheCheck = gtk_check_button_new_with_label("Clear cache on close");
   gtk_grid_attach(GTK_GRID(form), app->clearCacheCheck, 3, 1, 1, 1);
+  app->skipOptionalCheck = gtk_check_button_new_with_label("Optional high-res assets (+4.6 GB)");
+  gtk_widget_set_tooltip_text(app->skipOptionalCheck,
+      "Include optional high-resolution assets in the CASC install. "
+      "Disable to download only the required install content.");
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(app->skipOptionalCheck), TRUE);
+  app->entireCdnCheck = gtk_check_button_new_with_label("Entire CDN (all platforms/locales)");
+  gtk_widget_set_tooltip_text(app->entireCdnCheck,
+      "Download every content entry for the selected build, including all platforms, "
+      "locales, and optional assets. This is much larger than a normal install.");
+  g_signal_connect(app->entireCdnCheck, "toggled", G_CALLBACK(+[](GtkToggleButton* button, gpointer data) {
+    auto* self = static_cast<App*>(data);
+    gtk_widget_set_sensitive(self->skipOptionalCheck, !gtk_toggle_button_get_active(button));
+  }), app);
   gtk_widget_set_hexpand(app->outputEntry, TRUE);
   gtk_widget_set_hexpand(app->cacheEntry, TRUE);
 
+  GtkWidget* optionsRow = makeBox(GTK_ORIENTATION_HORIZONTAL, 18);
+  gtk_box_pack_start(GTK_BOX(destinationPanel), optionsRow, FALSE, FALSE, 0);
+  GtkWidget* checksRow = makeBox(GTK_ORIENTATION_HORIZONTAL, 12);
+  gtk_widget_set_valign(checksRow, GTK_ALIGN_CENTER);
+  gtk_box_pack_start(GTK_BOX(optionsRow), checksRow, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(checksRow), app->skipOptionalCheck, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(checksRow), app->entireCdnCheck, FALSE, FALSE, 0);
+
   GtkWidget* network = makeBox(GTK_ORIENTATION_HORIZONTAL, 10);
-  gtk_box_pack_start(GTK_BOX(destinationPanel), network, FALSE, FALSE, 0);
+  gtk_widget_set_valign(network, GTK_ALIGN_CENTER);
+  gtk_box_pack_end(GTK_BOX(optionsRow), network, FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(network), makeLabel("Connections: Global", "field"), FALSE, FALSE, 0);
   app->globalSpin = makeSpin(1, 512, 48);
   gtk_box_pack_start(GTK_BOX(network), app->globalSpin, FALSE, FALSE, 0);

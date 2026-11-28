@@ -394,6 +394,78 @@ namespace NGDP {
     return File(cacheRoot() / name);
   }
 
+  static uint32 localChecksumA(uint8 const* header) {
+    return hashlittle(header, 0x16, 0x3D6BE971);
+  }
+
+  static uint32 localChecksumB(uint8 const* header, uint64 globalOffset) {
+    static const uint32 lut[16] = {
+      0x049396B8, 0x72A82A9B, 0xEE626CCA, 0x9917754F,
+      0x15DE40B1, 0xF5A8A9B6, 0x421EAC7E, 0xA9D55C9A,
+      0x317FD40C, 0x04FAF80D, 0x3D6BE971, 0x52933CFD,
+      0x27F64B7D, 0xC6F5C11B, 0xD5757E3A, 0x6C388745,
+    };
+    uint8 accum[4]{};
+    for (uint32 i = 0; i < 0x1A; ++i) {
+      accum[static_cast<uint32>(globalOffset + i) & 3] ^= header[i];
+    }
+    uint32 offsetPlusHeader = static_cast<uint32>(globalOffset + 0x1E);
+    uint32 mask = lut[offsetPlusHeader & 0xF] ^ offsetPlusHeader;
+    uint8 maskBytes[4];
+    memcpy(maskBytes, &mask, 4);
+    uint8 result[4];
+    for (uint32 i = 0; i < 4; ++i) {
+      uint32 j = static_cast<uint32>(globalOffset + 0x1A + i) & 3;
+      result[i] = accum[j] ^ maskBytes[j];
+    }
+    uint32 value;
+    memcpy(&value, result, 4);
+    return value;
+  }
+
+  static void writeLocalHeader(File& out, uint8 const* key, uint32 encodedSize,
+                               uint16 flags, uint64 globalOffset) {
+    uint8 header[0x1E]{};
+    for (int i = 0; i < 16; ++i) header[i] = key[15 - i];
+    memcpy(header + 0x10, &encodedSize, 4);
+    memcpy(header + 0x14, &flags, 2);
+    uint32 checksumA = localChecksumA(header);
+    memcpy(header + 0x16, &checksumA, 4);
+    uint32 checksumB = localChecksumB(header, globalOffset);
+    memcpy(header + 0x1A, &checksumB, 4);
+    out.write(header, sizeof header);
+  }
+
+  static uint8 localBucket(uint8 const* key, uint8 seed) {
+    uint8 folded = 0;
+    for (int i = 0; i < 9; ++i) folded ^= key[i];
+    return static_cast<uint8>((((folded >> 4) ^ folded) + seed) & 0x0F);
+  }
+
+  static void buildSegmentKey(Hash out, Hash pathHash, uint32 segmentCount, uint8 bucket) {
+    memcpy(out, pathHash, 16);
+    out[1] = static_cast<uint8>(segmentCount);
+    out[2] = static_cast<uint8>(segmentCount >> 8);
+    for (uint32 probe = 0; probe < 0x100; ++probe) {
+      out[0] = static_cast<uint8>(probe);
+      if (localBucket(out, 1) == bucket) return;
+    }
+    out[0] = 0;
+  }
+
+  static void buildSegmentHeader(uint8* header, Hash pathHash, uint32 segmentIndex) {
+    uint64 segmentBase = static_cast<uint64>(segmentIndex) << 30;
+    MemoryFile block;
+    for (uint32 bucket = 0; bucket < 16; ++bucket) {
+      Hash key;
+      buildSegmentKey(key, pathHash, segmentIndex, static_cast<uint8>(bucket));
+      uint64 globalOffset = segmentBase + bucket * 0x1E;
+      writeLocalHeader(block, key, 0x1E, 1, globalOffset);
+    }
+    block.seek(0);
+    block.read(header, 0x1E0);
+  }
+
   DataStorage::DataStorage(CascStorage& storage)
     : storage_(storage)
     , dataCount_(0)
@@ -401,52 +473,69 @@ namespace NGDP {
   }
 
   File& DataStorage::addFile(const Hash hash, File& file) {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!file) return file;
-    uint8_t folded = 0;
-    for (int i = 0; i < 9; ++i) folded ^= hash[i];
-    uint32 bucket = ((folded >> 4) ^ folded) & 0x0F;
-    auto& index = indices_[bucket];
-    if (index.size() >= MaxIndexEntries) {
-      writeIndex(bucket);
-    }
-    if (!data_ || data_.size() + file.size() + 30 > MaxDataSize) {
-      data_ = storage_.addData(fmtstring("data.%03u", dataCount_++));
-    }
-    index.emplace_back();
-    auto& entry = index.back();
-    memcpy(entry.hash, hash, sizeof(Hash));
-    entry.index = dataCount_ - 1;
-    entry.offset = data_.tell();
-    entry.size = 30 + file.size();
 
-    for (int i = 15; i >= 0; --i) {
-      data_.write8(hash[i]);
+    uint32 bucket = localBucket(hash, 0);
+    auto& index = indices_[bucket];
+    if (index.size() >= MaxIndexEntries) writeIndex(bucket);
+
+    uint32 totalSize = 0x1E + static_cast<uint32>(file.size());
+    if (!data_ || data_.size() + totalSize > MaxDataSize) {
+      if (data_) data_.flush();
+      std::string name = fmtstring("data.%03u", dataCount_);
+      data_ = storage_.addData(name);
+      uint32 archiveId = dataCount_++;
+
+      Hash pathHash;
+      std::string archivePath = storage_.dataPath(name);
+      MD5::checksum(archivePath.data(), static_cast<uint32>(archivePath.size()), pathHash);
+      uint8 segmentHeader[0x1E0];
+      buildSegmentHeader(segmentHeader, pathHash, archiveId);
+      data_.write(segmentHeader, sizeof segmentHeader);
+
+      for (uint32 slot = 0; slot < 16; ++slot) {
+        Hash reconKey;
+        for (int i = 0; i < 16; ++i) reconKey[i] = segmentHeader[slot * 0x1E + 15 - i];
+        uint32 reconBucket = localBucket(reconKey, 1);
+        auto& reconIndex = indices_[reconBucket];
+        if (reconIndex.size() >= MaxIndexEntries) writeIndex(reconBucket);
+        reconIndex.emplace_back();
+        auto& recon = reconIndex.back();
+        memcpy(recon.hash, reconKey, sizeof(Hash));
+        recon.index = static_cast<uint16>(archiveId);
+        recon.offset = slot * 0x1E;
+        recon.size = 0x1E;
+      }
     }
-    data_.write32(30 + file.size());
-    data_.write16(0);
-    data_.write32(0);
-    data_.write32(0);
+
+    uint32 archiveId = dataCount_ - 1;
+    uint32 offset = static_cast<uint32>(data_.tell());
+    uint64 globalOffset = (static_cast<uint64>(archiveId) << 30) | offset;
+    writeLocalHeader(data_, hash, totalSize, 0, globalOffset);
     file.seek(0);
     data_.copy(file);
     file.seek(0);
+
+    index.emplace_back();
+    auto& entry = index.back();
+    memcpy(entry.hash, hash, sizeof(Hash));
+    entry.index = static_cast<uint16>(archiveId);
+    entry.offset = offset;
+    entry.size = totalSize;
     return file;
   }
 
 #pragma pack(push, 1)
-  struct IndexHeader {
+  struct V7IndexHeader {
     uint16 version = 7;
-    uint8 keyIndex;
+    uint8 bucket = 0;
     uint8 extraBytes = 0;
     uint8 sizeBytes = 4;
-    uint8 offsBytes = 5;
+    uint8 offsetBytes = 5;
     uint8 keyBytes = 9;
     uint8 segmentBits = 30;
-    uint64 maxOffset;
-  };
-  struct WriteIndexEntry {
-    uint8 hash[9];
-    uint8 pos[5];
-    uint32 size;
+    uint64 segmentSize = 0x4000000000ULL;
   };
 #pragma pack(pop)
 
@@ -454,53 +543,54 @@ namespace NGDP {
     if (bucket >= IndexCount) return;
     auto& index_ = indices_[bucket];
     if (index_.empty() && indexVersions_[bucket] != 0) return;
+    if (index_.empty()) return;
 
-    IndexHeader header;
-    header.keyIndex = static_cast<uint8>(bucket);
-    header.maxOffset = __builtin_bswap64(MaxDataSize);
     uint32 version = ++indexVersions_[bucket];
-
-    File index = storage_.addData(fmtstring("%02x%08x.idx", bucket, version));
-    index.write32(sizeof(IndexHeader));
-    index.write32(hashlittle(&header, sizeof header, 0));
-    index.write(&header, sizeof header);
-
     std::sort(index_.begin(), index_.end(), [](IndexEntry const& lhs, IndexEntry const& rhs) {
       return memcmp(lhs.hash, rhs.hash, sizeof(Hash)) < 0;
     });
 
-    // pad
+    V7IndexHeader header;
+    header.bucket = static_cast<uint8_t>(bucket);
+
+    File index = storage_.addData(fmtstring("%02x%08x.idx", bucket, version));
+    index.write32(sizeof(V7IndexHeader));
+    index.write32(hashlittle(&header, sizeof header, 0));
+    index.write(&header, sizeof header);
     index.write32(0);
     index.write32(0);
 
-    uint32 blockPos = index.tell();
-    uint32 blockSize = 0;
-    uint32 hashHigh = 0, hashLow = 0;
-    index.write32(blockSize);
-    index.write32(hashHigh);
+    uint32 blockSize = static_cast<uint32>(index_.size() * 18);
+    uint32 hashHigh = 0;
+    uint32 hashLow = 0;
+    std::vector<std::array<uint8_t, 18>> rawEntries;
+    rawEntries.reserve(index_.size());
     for (IndexEntry const& entry : index_) {
-      WriteIndexEntry write;
-      memcpy(write.hash, entry.hash, sizeof(write.hash));
-      *(uint32*) (write.pos + 1) = __builtin_bswap32(entry.offset);
-      write.pos[0] = entry.index / 4;
-      write.pos[1] |= ((entry.index & 3) << 6);
-      write.size = entry.size;
-
-      index.write(&write, sizeof write);
-      blockSize += sizeof(write);
-      hashlittle2(&write, sizeof write, &hashHigh, &hashLow);
+      std::array<uint8_t, 18> raw{};
+      memcpy(raw.data(), entry.hash, 9);
+      raw[9] = static_cast<uint8_t>(entry.index >> 2);
+      uint32 low = (static_cast<uint32>(entry.index & 3) << 30) | (entry.offset & 0x3FFFFFFF);
+      raw[10] = static_cast<uint8_t>(low >> 24);
+      raw[11] = static_cast<uint8_t>(low >> 16);
+      raw[12] = static_cast<uint8_t>(low >> 8);
+      raw[13] = static_cast<uint8_t>(low);
+      raw[14] = static_cast<uint8_t>(entry.size);
+      raw[15] = static_cast<uint8_t>(entry.size >> 8);
+      raw[16] = static_cast<uint8_t>(entry.size >> 16);
+      raw[17] = static_cast<uint8_t>(entry.size >> 24);
+      hashlittle2(raw.data(), raw.size(), &hashHigh, &hashLow);
+      rawEntries.push_back(raw);
     }
 
-    while (index.tell() & 3) {
-      index.write8(0);
-    }
-    while (index.tell() < 0xA0000) {
-      index.write32(0);
-    }
-
-    index.seek(blockPos, SEEK_SET);
     index.write32(blockSize);
     index.write32(hashHigh);
+    for (auto const& raw : rawEntries) index.write(raw.data(), raw.size());
+
+    while (index.tell() & 0xFFF) index.write8(0);
+    uint64 target = index.tell() + 0xC000;
+    target = (target + 0xFFFF) & ~static_cast<uint64>(0xFFFF);
+    if (target < 0x10000) target = 0x10000;
+    while (index.tell() < target) index.write8(0);
     index.flush();
 
     index_.clear();

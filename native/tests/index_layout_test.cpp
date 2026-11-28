@@ -1,16 +1,25 @@
 #include "ngdp.h"
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
-int bucketFor(NGDP::Hash const& hash) {
+int bucketFor(NGDP::Hash const& hash, int seed = 0) {
   uint8_t value = 0;
   for (int i = 0; i < 9; ++i) value ^= hash[i];
-  return ((value >> 4) ^ value) & 0x0F;
+  return (((value >> 4) ^ value) + seed) & 0x0F;
+}
+
+static std::vector<uint8_t> readAll(fs::path const& path) {
+  std::vector<uint8_t> data(fs::file_size(path));
+  std::ifstream in(path, std::ios::binary);
+  in.read(reinterpret_cast<char*>(data.data()), data.size());
+  return data;
 }
 
 int main() {
@@ -42,6 +51,7 @@ int main() {
     return 1;
   }
 
+  constexpr size_t EntrySize = 18;
   size_t totalEntries = 0;
   for (int bucket = 0; bucket < 16; ++bucket) {
     char expected[32];
@@ -50,28 +60,25 @@ int main() {
       std::cerr << "missing " << expected << "\n";
       return 1;
     }
-    File index((root / "Data" / "data" / expected).string());
-    index.seek(10);
-    if (index.read8() != bucket) {
-      std::cerr << "wrong bucket index in " << expected << "\n";
-      return 1;
-    }
-    index.seek(32);
-    uint32_t blockSize = index.read32();
-    index.seek(40);
-    for (uint32_t offset = 0; offset < blockSize; offset += 18) {
+    auto bytes = readAll(root / "Data" / "data" / expected);
+    uint32_t blockSize = bytes[32] | (bytes[33] << 8) | (bytes[34] << 16) | (bytes[35] << 24);
+    uint32_t count = blockSize / EntrySize;
+    for (uint32_t i = 0; i < count; ++i) {
+      size_t pos = 40 + i * EntrySize;
       NGDP::Hash hash{};
-      for (int i = 0; i < 9; ++i) hash[i] = index.read8();
-      index.seek(9, SEEK_CUR);
-      if (bucketFor(hash) != bucket) {
+      memcpy(hash, bytes.data() + pos, 9);
+      uint32_t size = bytes[pos + 14] | (bytes[pos + 15] << 8) |
+                      (bytes[pos + 16] << 16) | (bytes[pos + 17] << 24);
+      int seed = (size == 30) ? 1 : 0;
+      if (bucketFor(hash, seed) != bucket) {
         std::cerr << "key in wrong bucket in " << expected << "\n";
         return 1;
       }
       ++totalEntries;
     }
   }
-  if (totalEntries != 64) {
-    std::cerr << "expected 64 indexed entries, got " << totalEntries << "\n";
+  if (totalEntries != 80) {
+    std::cerr << "expected 80 indexed entries, got " << totalEntries << "\n";
     return 1;
   }
   return 0;

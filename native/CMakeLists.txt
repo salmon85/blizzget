@@ -141,7 +141,6 @@ if(BUILD_TESTING)
 
   add_executable(product_catalog_test
     tests/product_catalog_test.cpp
-    downloader.cpp
     version_sort.cpp
     ../src/base/checksum.cpp
     ../src/base/common.cpp
@@ -156,4 +155,53 @@ if(BUILD_TESTING)
   target_link_libraries(product_catalog_test PRIVATE PkgConfig::GTK3 PkgConfig::JSONGLIB)
   target_link_libraries(product_catalog_test PRIVATE ${SYSTEM_CURL_LIBRARY} ${LZ4_LIBRARY} ${ZLIB_LIBRARY})
   add_test(NAME blizztrack_product_catalog COMMAND product_catalog_test)
+
+  add_executable(extract_probe
+    tests/extract_probe.cpp
+    downloader.cpp
+    version_sort.cpp
+    ../src/base/checksum.cpp
+    ../src/base/common.cpp
+    ../src/base/error.cpp
+    ../src/base/file.cpp
+    ../src/base/http.cpp
+    ../src/base/path.cpp
+    ../src/base/string.cpp
+    ../src/ngdp.cpp
+  )
+  target_include_directories(extract_probe PRIVATE . ../src)
+  target_link_libraries(extract_probe PRIVATE PkgConfig::GTK3 PkgConfig::JSONGLIB)
+  target_link_libraries(extract_probe PRIVATE ${SYSTEM_CURL_LIBRARY} ${LZ4_LIBRARY} ${ZLIB_LIBRARY})
+
+  add_executable(data_storage_thread_test
+    tests/data_storage_thread_test.cpp
+    ../src/base/checksum.cpp
+    ../src/base/common.cpp
+    ../src/base/error.cpp
+    ../src/base/file.cpp
+    ../src/base/http.cpp
+    ../src/base/path.cpp
+    ../src/base/string.cpp
+    ../src/ngdp.cpp
+  )
+  target_include_directories(data_storage_thread_test PRIVATE . ../src)
+  target_link_libraries(data_storage_thread_test PRIVATE ${SYSTEM_CURL_LIBRARY} ${LZ4_LIBRARY} ${ZLIB_LIBRARY})
+  add_test(NAME data_storage_concurrent_writes COMMAND data_storage_thread_test)
+
+  add_executable(build_info_schema_test
+    tests/build_info_schema_test.cpp
+    version_sort.cpp
+    ../src/base/checksum.cpp
+    ../src/base/common.cpp
+    ../src/base/error.cpp
+    ../src/base/file.cpp
+    ../src/base/http.cpp
+    ../src/base/path.cpp
+    ../src/base/string.cpp
+    ../src/ngdp.cpp
+  )
+  target_include_directories(build_info_schema_test PRIVATE . ../src)
+  target_link_libraries(build_info_schema_test PRIVATE PkgConfig::GTK3 PkgConfig::JSONGLIB)
+  target_link_libraries(build_info_schema_test PRIVATE ${SYSTEM_CURL_LIBRARY} ${LZ4_LIBRARY} ${ZLIB_LIBRARY})
+  add_test(NAME build_info_schema_detection COMMAND build_info_schema_test)
 endif()

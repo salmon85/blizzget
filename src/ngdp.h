@@ -3,6 +3,7 @@
 #include "base/error.h"
 #include "base/file.h"
 #include <array>
+#include <mutex>
 #include <unordered_map>
 
 namespace NGDP {
@@ -138,6 +139,9 @@ namespace NGDP {
     File& addConfig(std::string const& hash, File& file);
     File& addIndex(std::string const& hash, File& file);
     File addData(std::string const& name);
+    std::string dataPath(std::string const& name) const {
+      return root_ + "/data/" + name;
+    }
 
     static File& addCache(std::string const& name, File& file);
     static File addCache(std::string const& name);
@@ -157,6 +161,7 @@ namespace NGDP {
     File& addFile(const Hash hash, File& file); // <- original (compressed) file
 
     void finish() {
+      std::lock_guard<std::mutex> lock(mutex_);
       if (data_) data_.flush();
       for (uint32 bucket = 0; bucket < IndexCount; ++bucket) writeIndex(bucket);
     }
@@ -168,6 +173,7 @@ namespace NGDP {
       MaxDataSize = 0x40000000,
     };
     CascStorage& storage_;
+    std::mutex mutex_;
     struct IndexEntry {
       Hash hash;
       uint32 size;
