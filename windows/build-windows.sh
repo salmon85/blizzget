@@ -40,12 +40,11 @@ sources=(
 )
 
 curl_libs="$(pkg-config --static --libs libcurl)"
-"$CXX" -std=gnu++17 -O2 -mwindows \
+"$CXX" -std=gnu++17 -O2 -mwindows -static -static-libgcc -static-libstdc++ \
   -I src -I vc13 -I libs/lz4 -I libs/zlib \
   "${sources[@]}" \
   $curl_libs -lz -llz4 \
   -lcomctl32 -lole32 -luuid -loleaut32 -lshlwapi -lws2_32 -lcrypt32 \
-  -static -static-libgcc -static-libstdc++ \
   -o "$OUT_DIR/BlizzGet.exe"
 
 echo "built $OUT_DIR/BlizzGet.exe"
