@@ -40,7 +40,7 @@ sources=(
 )
 
 curl_libs="$(pkg-config --static --libs libcurl | sed 's/-lcurl/-Wl,-Bstatic -lcurl -Wl,-Bdynamic/')"
-"$CXX" -std=gnu++17 -O2 -mwindows -static -static-libgcc -static-libstdc++ \
+"$CXX" -std=gnu++17 -O2 -mwindows -DCURL_STATICLIB -static -static-libgcc -static-libstdc++ \
   -I src -I vc13 -I libs/lz4 -I libs/zlib \
   "${sources[@]}" \
   $curl_libs -lz -llz4 \
