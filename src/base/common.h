@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <string>
 #include <vector>
 #define NOMINMAX
@@ -64,17 +65,35 @@ template<> struct FlipTraits<1> {
 
 template<> struct FlipTraits<2> {
   typedef std::uint16_t T;
-  static T flip(T x) { return __builtin_bswap16(x); }
+  static T flip(T x) {
+#if defined(_MSC_VER)
+    return _byteswap_ushort(x);
+#else
+    return __builtin_bswap16(x);
+#endif
+  }
 };
 
 template<> struct FlipTraits<4> {
   typedef std::uint32_t T;
-  static T flip(T x) { return __builtin_bswap32(x); }
+  static T flip(T x) {
+#if defined(_MSC_VER)
+    return _byteswap_ulong(x);
+#else
+    return __builtin_bswap32(x);
+#endif
+  }
 };
 
 template<> struct FlipTraits<8> {
   typedef std::uint64_t T;
-  static T flip(T x) { return __builtin_bswap64(x); }
+  static T flip(T x) {
+#if defined(_MSC_VER)
+    return _byteswap_uint64(x);
+#else
+    return __builtin_bswap64(x);
+#endif
+  }
 };
 
 template<typename T>

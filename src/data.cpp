@@ -1,5 +1,6 @@
 #define NOMINMAX
 #include "base/http.h"
+#include "base/json.h"
 #include "data.h"
 #include "base/thread.h"
 #include "app.h"
