@@ -85,5 +85,6 @@ jobs:
             gh release create "$RELEASE_TAG" \
               dist/BlizzGet-Linux-x86_64.AppImage \
               dist/BlizzGet-Windows-x86_64.exe \
+              --target "$GITHUB_SHA" \
               --title "BlizzGet $RELEASE_TAG" --generate-notes
           fi
