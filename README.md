@@ -22,6 +22,16 @@ See [linux/README.md](linux/README.md) for build and usage instructions.
 The upstream Win32 source remains in `src/` and `vc13/`, but the packaged Linux
 release contains no Python or Tkinter wrapper.
 
+## Windows release
+
+The release also includes `BlizzGet-Windows-x86.zip`, built from the upstream
+Win32 project in `vc13/BlizzGet.sln`. Unzip it and run `BlizzGet.exe`; it is a
+native Win32 executable and needs no separate .NET or Visual C++ runtime. The
+binary is 32-bit and runs on both 32-bit and 64-bit Windows.
+
+To build it locally with Visual Studio 2022, open `vc13/BlizzGet.sln`, select
+**Release | Win32**, and build.
+
 <hr/>
 
 <b>Overwatch Beta</b>
