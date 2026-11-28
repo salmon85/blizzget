@@ -5,6 +5,7 @@
 #include <array>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
 
 namespace NGDP {
 
@@ -84,6 +85,9 @@ namespace NGDP {
   };
 
   File DecodeBLTE(File& blte, uint32 usize = 0);
+  File DecodeBLTE(File&& blte, uint32 usize = 0) {
+    return DecodeBLTE(blte, usize);
+  }
   typedef std::map<std::string, std::string> ConfigFile;
   ConfigFile ParseConfig(File& file);
 
@@ -137,6 +141,9 @@ namespace NGDP {
     CascStorage(std::string const& root);
 
     File& addConfig(std::string const& hash, File& file);
+    void addConfig(std::string const& hash, File&& file) {
+      addConfig(hash, file);
+    }
     File& addIndex(std::string const& hash, File& file);
     File addData(std::string const& name);
     std::string dataPath(std::string const& name) const {
@@ -159,6 +166,10 @@ namespace NGDP {
     }
 
     File& addFile(const Hash hash, File& file); // <- original (compressed) file
+    File addFile(const Hash hash, File&& file) {
+      addFile(hash, file);
+      return std::move(file);
+    }
 
     void finish() {
       std::lock_guard<std::mutex> lock(mutex_);

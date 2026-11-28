@@ -372,5 +372,8 @@ protected:
 };
 
 bool write(File& file, Value const& value, int mode = mJSON, char const* func = nullptr);
+inline bool write(File&& file, Value const& value, int mode = mJSON, char const* func = nullptr) {
+  return write(file, value, mode, func);
+}
 
 }

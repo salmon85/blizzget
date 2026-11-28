@@ -199,6 +199,9 @@ public:
   File subfile(uint64 offset, uint64 size);
 
   void copy(File& src, uint64 size = max_uint64);
+  void copy(File&& src, uint64 size = max_uint64) {
+    copy(src, size);
+  }
   void md5(void* digest);
   std::string md5();
 
