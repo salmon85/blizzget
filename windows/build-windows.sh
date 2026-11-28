@@ -39,7 +39,7 @@ sources=(
   libs/lz4/lz4.c
 )
 
-curl_libs="$(pkg-config --static --libs libcurl)"
+curl_libs="$(pkg-config --static --libs libcurl | sed 's/-lcurl/-Wl,-Bstatic -lcurl -Wl,-Bdynamic/')"
 "$CXX" -std=gnu++17 -O2 -mwindows -static -static-libgcc -static-libstdc++ \
   -I src -I vc13 -I libs/lz4 -I libs/zlib \
   "${sources[@]}" \
