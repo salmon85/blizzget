@@ -24,13 +24,12 @@ release contains no Python or Tkinter wrapper.
 
 ## Windows release
 
-The release also includes `BlizzGet-Windows-x86.zip`, built from the upstream
-Win32 project in `vc13/BlizzGet.sln`. Unzip it and run `BlizzGet.exe`; it is a
-native Win32 executable and needs no separate .NET or Visual C++ runtime. The
-binary is 32-bit and runs on both 32-bit and 64-bit Windows.
+The release includes `BlizzGet-Windows-x86_64.exe`, a standalone 64-bit build
+of the upstream Win32 GUI. Run it directly; no extra runtime or installer is
+required.
 
-To build it locally with Visual Studio 2022, open `vc13/BlizzGet.sln`, select
-**Release | Win32**, and build.
+To build it locally, use an MSYS2 UCRT64 shell with `gcc`, `curl`, `zlib`,
+`lz4`, and `pkgconf` installed, then run `windows/build-windows.sh`.
 
 <hr/>
 

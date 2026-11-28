@@ -39,26 +39,27 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build Windows app
-        shell: pwsh
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-lz4
+            mingw-w64-ucrt-x86_64-pkgconf
+          path-type: inherit
+      - name: Build Windows executable
+        shell: msys2 {0}
         run: |
-          $msbuild = (Get-Command msbuild.exe -ErrorAction SilentlyContinue).Source
-          if (-not $msbuild) {
-            $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-            $msbuild = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
-          }
-          & $msbuild vc13\BlizzGet.sln /m /p:Configuration=Release /p:Platform=Win32
-          New-Item -ItemType Directory -Force dist | Out-Null
-          $exe = Get-ChildItem -Path vc13 -Recurse -Filter BlizzGet.exe |
-            Where-Object { $_.FullName -match '\\Release\\' } |
-            Select-Object -First 1
-          if (-not $exe) { throw 'BlizzGet.exe was not produced' }
-          Copy-Item $exe.FullName dist\BlizzGet.exe
-          Compress-Archive -Path dist\BlizzGet.exe -DestinationPath dist\BlizzGet-Windows-x86.zip -Force
+          chmod +x windows/build-windows.sh
+          ./windows/build-windows.sh
+          cp dist/BlizzGet.exe dist/BlizzGet-Windows-x86_64.exe
       - uses: actions/upload-artifact@v4
         with:
-          name: BlizzGet-Windows-x86.zip
-          path: dist/BlizzGet-Windows-x86.zip
+          name: BlizzGet-Windows-x86_64.exe
+          path: dist/BlizzGet-Windows-x86_64.exe
           if-no-files-found: error
 
   release:
@@ -78,9 +79,11 @@ jobs:
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" \
               dist/BlizzGet-Linux-x86_64.AppImage \
-              dist/BlizzGet-Windows-x86.zip --clobber
+              dist/BlizzGet-Windows-x86_64.exe --clobber
+            gh release edit "$RELEASE_TAG" --title "BlizzGet $RELEASE_TAG"
           else
             gh release create "$RELEASE_TAG" \
               dist/BlizzGet-Linux-x86_64.AppImage \
-              dist/BlizzGet-Windows-x86.zip --generate-notes
+              dist/BlizzGet-Windows-x86_64.exe \
+              --title "BlizzGet $RELEASE_TAG" --generate-notes
           fi
